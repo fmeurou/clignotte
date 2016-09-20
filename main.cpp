@@ -15,8 +15,9 @@
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
+    QString notebookTable = "notebook";
     QString noteTable = "note";
-    QCoreApplication::setApplicationName("clignote");
+    QCoreApplication::setApplicationName("clignotte");
     QCoreApplication::setApplicationVersion("1.0");
 
     QString storedNotes = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -36,7 +37,11 @@ int main(int argc, char *argv[])
         query = QSqlQuery(db);
         if(!db.tables().contains(noteTable))  {
             qDebug() << "table note is not present, creating";
-            if(!query.exec(QString("CREATE TABLE %1(id INTEGER PRIMARY KEY, created_at DATETIME, text TEXT);").arg(noteTable)))    {
+            if(!(query.exec(QString("CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT);").arg(notebookTable))
+                    &&
+                 query.exec(QString("CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"))
+                 ))
+            {
                 qDebug() << query.lastQuery() << query.lastError() << db.lastError();
                 std::cout  << "error creating database";
                 exit(-1);
