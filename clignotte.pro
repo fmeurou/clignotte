@@ -12,3 +12,6 @@ TEMPLATE = app
 SOURCES += main.cpp
 
 HEADERS +=
+
+DISTFILES += \
+    pkg/archlinux/PKGBUILD
