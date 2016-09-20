@@ -12,11 +12,14 @@
 #include <QDateTime>
 #include <iostream>
 
+
 int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QString notebookTable = "notebook";
     QString noteTable = "note";
+    QString currentNotebookId = 0;
+    QString currentNotebookName = "";
     QCoreApplication::setApplicationName("clignotte");
     QCoreApplication::setApplicationVersion("1.0");
 
@@ -37,7 +40,7 @@ int main(int argc, char *argv[])
         query = QSqlQuery(db);
         if(!db.tables().contains(noteTable))  {
             qDebug() << "table note is not present, creating";
-            if(!(query.exec(QString("CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT);").arg(notebookTable))
+            if(!(query.exec(QString("CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL);"))
                     &&
                  query.exec(QString("CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"))
                  ))
@@ -45,7 +48,20 @@ int main(int argc, char *argv[])
                 qDebug() << query.lastQuery() << query.lastError() << db.lastError();
                 std::cout  << "error creating database";
                 exit(-1);
+            }   else    {
+                std::cout  << "inserting default notebook";
+                query.exec(QString("INSERT INTO notebook(id, title, last_used) values(0, 'default', 1);"));
+
             }
+        }   else    {
+            query.exec("SELECT id, title FROM notebook WHERE last_used = 1");
+            if(query.first())   {
+                QSqlRecord record;
+                record = query.record();
+                currentNotebookId = record.value(0).toString();
+                currentNotebookName = record.value(1).toString();
+            }
+
         }
     }
       QCommandLineParser parser;
@@ -59,26 +75,25 @@ int main(int argc, char *argv[])
       parser.process(app);
 
       const QStringList args = parser.positionalArguments();
-      if(!args.length())    {
-          std::cout  << "argument required, use --help";
-          exit(0);
-      }
-      // source is args.at(0), destination is args.at(1)
-
-      if(args.at(0) == "list")  {
-            if(query.exec(QString("select * from %1").arg(noteTable)))    {;
+      if(!args.length() || args.at(0) == "list")  {
+            QString listQuery;
+            listQuery = "select notebook.title, note.id, note.created_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id";
+            if(query.exec(listQuery))    {
                 if(query.first())   {
                     QSqlRecord record;
-                    std::cout  << "  id   |    creation date    |  note \n";
+                    std::cout  << "  notebook   |   id   |    creation date    |  note \n";
                     std::cout  << QString("").fill('-',80).toStdString() << "\n";
                     do  {
                         record = query.record();
-                        std::cout  << QString().fill(' ', 6-record.value(0).toString().length()).toStdString()
+                        std::cout
                                 << record.value(0).toString().toStdString()
                                 << " | "
-                                << record.value(1).toDateTime().toString(Qt::ISODate).toStdString()
+                                << QString().fill(' ', 6-record.value(0).toString().length()).toStdString()
+                                << record.value(1).toString().toStdString()
                                 << " | "
-                                << record.value(2).toString().toStdString()
+                                << record.value(2).toDateTime().toString(Qt::ISODate).toStdString()
+                                << " | "
+                                << record.value(3).toString().toStdString()
                                 << "\n";
 
                     }   while(query.next());
@@ -91,15 +106,87 @@ int main(int argc, char *argv[])
             }
             exit(0);
       }
+      // source is args.at(0), destination is args.at(1)
+      if(args.at(0) == "notebook")   {
+          if(args.length() < 2) {
+              std::cout  << "no notebook to choose or create...";
+          }
+          else {
+              query.prepare("SELECT id, title FROM notebook WHERE title=:title");
+              query.bindValue(":title", args.mid(1).join(" "));
+              query.exec();
+              if(query.first())   {
+                  QSqlRecord record;
+                  record = query.record();
+                  currentNotebookId = record.value(0).toString();
+                  currentNotebookName = record.value(1).toString();
+                  qDebug() << currentNotebookId << currentNotebookName;
+                  query.exec("UPDATE notebook SET last_used=0");
+                  query.exec(QString("UPDATE notebook SET last_used=1 WHERE id=%1").arg(QVariant(currentNotebookId).toString()));
+                  std::cout  << "notebook selected\n";
+              } else    {
+                  query.exec("UPDATE notebook SET last_used=0");
+                  qDebug() << args.mid(1).join(" ");
+                  QString text = args.mid(1).join(" ");
+                  query.prepare("insert into notebook values(NULL, :title, 1);");
+                  query.bindValue(":title", args.mid(1).join(" "));
+                  if(query.exec())  {
+                      std::cout  << "notebook added\n";
+                  } else    {
+                      std::cout  << "error saving notebook to database\n";
+                      qDebug() << query.lastQuery() << query.lastError() << db.lastError();
+                  }
+                  query.exec("SELECT id, title FROM notebook WHERE last_used = 1");
+                  if(query.first())   {
+                      QSqlRecord record;
+                      record = query.record();
+                      currentNotebookId = record.value(0).toString();
+                      currentNotebookName = record.value(1).toString();
+                      qDebug() << currentNotebookId << currentNotebookName;
+                  }
+              }
+          }
+          exit(0);
+      }
+
+      if(args.at(0) == "notebooks")  {
+            QString listQuery;
+            listQuery = "SELECT title, last_used FROM notebook ORDER BY last_used, title";
+            if(query.exec(listQuery))    {
+                if(query.first())   {
+                    QSqlRecord record;
+                    std::cout  << "  title (* last_used) \n";
+                    std::cout  << QString("").fill('-',80).toStdString() << "\n";
+                    do  {
+                        record = query.record();
+                        QString lastUsed = "";
+                        if(record.value(1).toBool()) lastUsed="(*)";
+                        std::cout
+                                << record.value(0).toString().toStdString()
+                                << lastUsed.toStdString()
+                                << "\n";
+                    }   while(query.next());
+                }   else    {
+                    std::cout  << QCoreApplication::translate("main", "No note available\n").toStdString();
+                }
+            } else    {
+                std::cout  << "error querying database\n";
+                qDebug() << query.lastQuery() << query.lastError() << db.lastError();
+            }
+            exit(0);
+      }
+
+
       if(args.at(0) == "add")   {
           if(args.length() < 2) {
               std::cout  << "no note to add...";
           }
           else {
-              qDebug() << args.mid(1).join(" ");
+              qDebug() << args.mid(1).join(" ") << currentNotebookId;
               QString text = args.mid(1).join(" ");
-              query.prepare(QString("insert into %1 values(NULL, :currentDateTime, :text)").arg(noteTable));
+              query.prepare(QString("insert into %1(notebook, created_at, text) values(:notebook, :currentDateTime, :text)").arg(noteTable));
               query.bindValue(":currentDateTime", QDateTime::currentDateTime());
+              query.bindValue(":notebook", currentNotebookId);
               query.bindValue(":text", text);
               if(query.exec())  {
                   std::cout  << "note added\n";
