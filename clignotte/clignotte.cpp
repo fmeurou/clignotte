@@ -1,10 +1,4 @@
-
-
-#include <QCoreApplication>
-#include <QCommandLineOption>
-#include <QCommandLineParser>
-#include <QStandardPaths>
-#include <QDir>
+#include "clignotte.h"
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlRecord>
@@ -12,66 +6,11 @@
 #include <QDebug>
 #include <QTextStream>
 #include <QDateTime>
-#include <iostream>
 
-// DEFINE queries
-#define CREATE_NOTEBOOK_TABLE "CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL);"
-#define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"
-#define INIT_NOTEBOOK_TABLE "INSERT INTO notebook(id, title, last_used) values(0, 'default', 1);"
-#define LIST_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY done_at, due_date ASC, text"
-#define LIST_ACTIVE_NOTEBOOKS "SELECT DISTINCT notebook.id, notebook.title FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY notebook.title"
-#define LIST_NOTEBOOK_NOTES "select note.text, note.due_date, note.done_at FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE notebook.id=:notebook ORDER BY done_at, due_date ASC, text"
-#define CURRENT_NOTEBOOK "SELECT id, title FROM notebook WHERE last_used = 1"
-#define INSERT_NOTE "insert into note(notebook, created_at, text) values(:notebook, :currentDateTime, :text)"
-#define UPDATE_DUE_DATE "UPDATE note SET due_date=:dueDate WHERE id=:id"
-#define UPDATE_DONE "UPDATE note SET done_at=:currentDateTime WHERE id=:id"
-#define DELETE_NOTE "delete from note where id=:id"
-#define SELECT_NOTEBOOK_BY_TITLE "SELECT id, title FROM notebook WHERE title=:title"
-#define RESET_LAST_USED "UPDATE notebook SET last_used=0"
-#define UPDATE_LAST_USED "UPDATE notebook SET last_used=1 WHERE id=%1"
-#define INSERT_NOTEBOOK "insert into notebook values(NULL, :title, 1);"
-#define LIST_NOTEBOOKS "SELECT title, last_used FROM notebook ORDER BY last_used, title"
-
-#define IMPORTANT_TEXT "\e[1;31m"
-#define URGENT_TEXT "\e[7;31m"
-#define BOLD_TEXT "\e[1m"
-#define ITALIC_TEXT "\e[3m"
-#define END_BOLD_TEXT "\e[21m"
-#define INVERTED_TEXT "\e[7m"
-#define END_INVERTED_TEXT "\e[27m"
-#define NORMAL_TEXT "\e[0m"
-#define UNDERLINED_TEXT "\e[4m"
-
-QTextStream out(stdout);
+Clignotte::Clignotte()
+{}
 
 
-QSqlQuery initDb(QSqlDatabase db)   {
-    if(!db.open()) {
-        qCritical() << "unable to open db";
-        qDebug() << db.lastError().text();
-        exit(-2);
-    }   else    {
-        QSqlQuery query = QSqlQuery(db);
-        if(!db.tables().contains("note"))  {
-            qInfo() << "table note is not present, creating";
-            if(!(query.exec(QString(CREATE_NOTEBOOK_TABLE))
-                    &&
-                 query.exec(QString(CREATE_NOTE_TABLE))
-                 ))
-            {
-                qCritical()  << "error creating database";
-                qDebug() << query.lastQuery() << query.lastError() << db.lastError();
-                exit(-1);
-            }   else    {
-                qInfo()  << "inserting default notebook";
-                query.exec(QString(INIT_NOTEBOOK_TABLE));
-
-            }
-        }
-        return query;
-    }
-
-}
 
 void list(QSqlQuery query, QSqlDatabase db) {
     QString listQuery;
@@ -333,105 +272,4 @@ void listNotebooks(QSqlQuery query, QSqlDatabase db)    {
         qDebug() << query.lastQuery() << query.lastError() << db.lastError();
     }
 }
-
-
-int main(int argc, char *argv[])
-{
-    QCoreApplication app(argc, argv);
-    QCoreApplication::setApplicationName("clignotte");
-    QCoreApplication::setApplicationVersion("1.0");
-    QMap<QString, QString> currentNotebook;
-
-    QString storedNotes = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    if(!QDir(storedNotes).exists() && !QDir(storedNotes).mkpath(storedNotes)) {
-        std::cout  << "unable to create directory, exiting...";
-        exit(-1);
-    }
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
-    QDir storage(storedNotes);
-    db.setDatabaseName(storage.absoluteFilePath("notes.db"));
-    QSqlQuery query = initDb(db);
-    currentNotebook = getCurrentNotebook(query, db);
-    QCommandLineParser parser;
-    parser.setApplicationDescription("Note helper");
-    parser.addHelpOption();
-    parser.addVersionOption();
-    parser.addPositionalArgument("command", QCoreApplication::translate("main", "what to do (list, add, delete)"));
-    parser.addPositionalArgument("content", QCoreApplication::translate("main", "note id or text"));
-
-    // Process the actual command line arguments given by the user
-    parser.process(app);
-
-    const QStringList args = parser.positionalArguments();
-    if(!args.length())  {
-        pretty(query, db);
-        exit(0);
-    }
-    if(args.at(0) == "list")  {
-        list(query, db);
-        exit(0);
-    }
-    // source is args.at(0), destination is args.at(1)
-    if(args.at(0) == "notebook")   {
-        if(args.length() < 2) {
-            out  << "no notebook to choose or create...";
-        }
-        else {
-            setNotebookByTitle(query, db, args.mid(1).join(" "));
-            currentNotebook = getCurrentNotebook(query, db);
-        }
-        exit(0);
-    }
-
-    if(args.at(0) == "notebooks")  {
-        listNotebooks(query, db);
-        exit(0);
-    }
-
-
-    if(args.at(0) == "add")   {
-        if(args.length() < 2) {
-            out  << "no note to add...";
-        }
-        else {
-            qDebug() << args.mid(1).join(" ") << currentNotebook["id"];
-            addNote(query, db, args.mid(1).join(" "), currentNotebook);
-
-        }
-        exit(0);
-    }
-
-    if(args.at(0) == "close")   {
-        if(args.length() < 2) {
-            out  << "no note to close...";
-        }
-        else {
-            endNote(query, db, args.at(1));
-
-        }
-        exit(0);
-    }
-
-    if(args.at(0) == "due")   {
-        if(args.length() < 2) {
-            out  << "no note to update...";
-        }
-        else {
-            setDueDate(query, db, args.at(1), args.at(2));
-
-        }
-        exit(0);
-    }
-
-    if(args.at(0) == "delete")   {
-        if(args.length() < 2) {
-            out  << "no note to delete...\n";
-        }
-        else {
-            deleteNote(query, db, args.at(1));
-        }
-        exit(0);
-    }
-
-    return app.exec();
 }

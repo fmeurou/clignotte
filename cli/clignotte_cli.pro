@@ -3,11 +3,13 @@ QT -= gui
 
 CONFIG += c++11
 
-TARGET = note
-CONFIG += console sqlite
+TARGET = clignotte_cli
+CONFIG += console
 CONFIG -= app_bundle
 
 TEMPLATE = app
+
+LIB += -lclignotte
 
 SOURCES += main.cpp
 

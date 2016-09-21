@@ -1,0 +1,12 @@
+#ifndef CLIGNOTTE_GLOBAL_H
+#define CLIGNOTTE_GLOBAL_H
+
+#include <QtCore/qglobal.h>
+
+#if defined(CLIGNOTTE_LIBRARY)
+#  define CLIGNOTTESHARED_EXPORT Q_DECL_EXPORT
+#else
+#  define CLIGNOTTESHARED_EXPORT Q_DECL_IMPORT
+#endif
+
+#endif // CLIGNOTTE_GLOBAL_H
