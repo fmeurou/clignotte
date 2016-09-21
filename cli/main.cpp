@@ -1,5 +1,3 @@
-
-
 #include <QCoreApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
@@ -8,37 +6,139 @@
 #include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QSqlRecord>
+#include <QTextStream>
+#include <QDebug>
 
 #include <iostream>
 
+#include <clignotte.h>
+
 QTextStream out(stdout);
 
-QSqlQuery initDb(QSqlDatabase db)   {
-    if(!db.open()) {
-        qCritical() << "unable to open db";
-        qDebug() << db.lastError().text();
-        exit(-2);
-    }   else    {
-        QSqlQuery query = QSqlQuery(db);
-        if(!db.tables().contains("note"))  {
-            qInfo() << "table note is not present, creating";
-            if(!(query.exec(QString(CREATE_NOTEBOOK_TABLE))
-                    &&
-                 query.exec(QString(CREATE_NOTE_TABLE))
-                 ))
-            {
-                qCritical()  << "error creating database";
-                qDebug() << query.lastQuery() << query.lastError() << db.lastError();
-                exit(-1);
-            }   else    {
-                qInfo()  << "inserting default notebook";
-                query.exec(QString(INIT_NOTEBOOK_TABLE));
-
-            }
-        }
-        return query;
+void displayNotebooks(QSqlQuery query, QSqlDatabase db)    {
+    QList<Notebook> notebooks;
+    out  << "  title (* last_used) \n";
+    out  << QString("").fill('-',80) << "\n";
+    out.flush();
+    foreach (Notebook notebook, notebooks) {
+        QString lastUsed = "";
+        if(notebook.getlastUsed()) lastUsed="(*)";
+        out
+                << notebook.getTitle()
+                << lastUsed
+                << "\n";
     }
+    out.flush();
+}
 
+void displayNotes(QTextStream out, Clignotte clignotte)  {
+    QList<Note> notes = clignotte.notes();
+    out.setFieldAlignment(QTextStream::AlignCenter);
+    out     << UNDERLINED_TEXT<< "|"
+            << qSetFieldWidth(4) << "id"
+            << qSetFieldWidth(1) << "|"
+            << qSetFieldWidth(20) << "notebook"
+            << qSetFieldWidth(1) << "|"
+            << qSetFieldWidth(20) << "due date"
+            << qSetFieldWidth(1) << "|"
+            << qSetFieldWidth(4) << "done"
+            << qSetFieldWidth(1) << "|"
+            << qSetFieldWidth(81) << "note"
+            << qSetFieldWidth(1) << "|\n"
+            << NORMAL_TEXT;
+    out.setFieldAlignment(QTextStream::AlignLeft);
+    foreach(Note note, notes)    {
+        if(note.isDone())   {
+            out << ITALIC_TEXT;
+        }   else if(note.isDue())   {
+            out << URGENT_TEXT;
+        }   else if(note.isImportant())  {
+            out << IMPORTANT_TEXT;
+        }     else if(note.isBold()) {
+            out << INVERTED_TEXT;
+        }   else    {
+            out << NORMAL_TEXT;
+        }
+        out     << qSetFieldWidth(1) << "|"
+                << qSetFieldWidth(4) << note.getId()
+                << qSetFieldWidth(1) << "|"
+                << qSetFieldWidth(20) << note.getNotebook()
+                << qSetFieldWidth(1) << "|"
+                << qSetFieldWidth(20) << note.getDueDate().toString(Qt::ISODate).left(20)
+                << qSetFieldWidth(1) << "|"
+                << qSetFieldWidth(4) << note.getDoneBool()
+                << qSetFieldWidth(1) << "|"
+                << qSetFieldWidth(81) << note.getText()
+                << qSetFieldWidth(1) << "|";
+        out << NORMAL_TEXT;
+        out << "\n";
+    }
+    out.flush();
+    exit(0);
+}
+
+void pretty()   {
+    QString listQuery;
+    listQuery = QString(LIST_ACTIVE_NOTEBOOKS);
+    if(query.exec(listQuery))    {
+        if(query.first())   {
+            QSqlRecord record;
+            do  {
+                record = query.record();
+                out << record.value(1).toString() << "\n";
+                out.flush();
+                QSqlQuery subquery;
+                subquery.prepare(QString(LIST_NOTEBOOK_NOTES));
+                subquery.bindValue(":notebook", record.value(0));
+                if(subquery.exec()) {
+                    if(subquery.first())   {
+                        QSqlRecord subrecord;
+                        do  {
+                            subrecord = subquery.record();
+                            QString text = subrecord.value(0).toString();
+                            QDate dueDate = subrecord.value(1).toDate();
+                            bool isImportant = text.startsWith("!");
+                            bool isBold = text.startsWith("*");
+                            bool isDue = dueDate.isValid() && (dueDate < QDate::currentDate());
+                            bool isDone = subrecord.value(2).toBool();
+                            out  << "\t";
+                            if(isDone)   {
+                                out << ITALIC_TEXT;
+                            }   else if(isDue)   {
+                                out << URGENT_TEXT;
+                            }   else if(isImportant)  {
+                                out << IMPORTANT_TEXT;
+                            }     else if(isBold) {
+                                out << INVERTED_TEXT;
+                            }   else    {
+                                out << NORMAL_TEXT;
+                            }
+                            out << "- " << subrecord.value(0).toString();
+                            if(dueDate.isValid() && !isDone) {
+                                out << dueDate.toString(" (yyyy-MM-dd)");
+                            }
+                            out << NORMAL_TEXT;
+                            out << "\n";
+                        }   while(subquery.next());
+                        out.flush();
+                    }   else    {
+                        out  << QCoreApplication::translate("main", "No note available\n");
+                        out.flush();
+                    }
+                } else    {
+                    qCritical()  << "error querying database\n";
+                    qDebug() << subquery.lastQuery() << subquery.lastError() << db.lastError();
+                }
+
+            }   while(query.next());
+        }   else    {
+            out  << QCoreApplication::translate("main", "No note available\n");
+        }
+    } else    {
+        qCritical()  << "error querying database\n";
+        qDebug() << query.lastQuery() << query.lastError() << db.lastError();
+    }
+    exit(0);
 }
 
 
@@ -55,11 +155,9 @@ int main(int argc, char *argv[])
         std::cout  << "unable to create directory, exiting...";
         exit(-1);
     }
-    QSqlDatabase db = QSqlDatabase::addDatabase("QSQLITE");
-    QDir storage(storedNotes);
-    db.setDatabaseName(storage.absoluteFilePath("notes.db"));
-    QSqlQuery query = initDb(db);
-    currentNotebook = getCurrentNotebook(query, db);
+
+    Clignotte clignotte(storedNotes);
+    clignotte.initDb();
     QCommandLineParser parser;
     parser.setApplicationDescription("Note helper");
     parser.addHelpOption();
