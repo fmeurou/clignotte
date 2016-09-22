@@ -8,6 +8,11 @@ Clignotte::Clignotte(QString location) {
     m_db.setDatabaseName(storage.absoluteFilePath("notes.db"));
 }
 
+bool Clignotte::clearDb()   {
+    QFile db(m_location);
+    return db.remove();
+}
+
 bool Clignotte::initDb()   {
     if(!m_db.open()) {
         qCritical() << "unable to open db";
@@ -237,6 +242,51 @@ bool Note::isDone() {
     return m_doneDate.isValid();
 }
 
+void Note::encrypt(QString email)   {
+    QUuid uuid = QUuid::createUuid();
+    QString fileName = QString("/tmp/%1").arg(uuid.toString());
+    QFile tmpFile(fileName);
+    if(tmpFile.open(QFile::ReadWrite))  {
+        tmpFile.write(m_text.toLatin1());
+    }
+    tmpFile.close();
+    QProcess process;
+    QString command;
+    if(email.isEmpty()) {
+        command = QString("gpg --output %1 --encrypt %1").arg(fileName);
+    }   else    {
+        command = QString("gpg --output %1 --encrypt --recipient %2 %1").arg(fileName).arg(email);
+    }
+    qDebug() << command;
+    process.start(command);
+    while(process.waitForFinished()) {};
+    tmpFile.open(QFile::ReadOnly);
+    QString output = tmpFile.readAll();
+    tmpFile.close();
+    tmpFile.remove();
+    updateText(output);
+}
+
+QString Note::decrypt()   {
+    QUuid uuid = QUuid::createUuid();
+    QString fileName = QString("/tmp/%1").arg(uuid.toString());
+    QFile tmpFile(fileName);
+    if(tmpFile.open(QFile::ReadWrite))  {
+        tmpFile.write(m_text.toLatin1());
+    }
+    tmpFile.close();
+    QProcess process;
+    QString command;
+    command = QString("gpg --output %1 --decrypt %1").arg(fileName);
+    process.start(command);
+    while(process.waitForFinished()) {};
+    tmpFile.open(QFile::ReadOnly);
+    QString output = tmpFile.readAll();
+    tmpFile.close();
+    tmpFile.remove();
+    return output;
+}
+
 Note Note::get(QSqlDatabase v_db, int v_id)    {
     QSqlQuery query = QSqlQuery(v_db);
     query.prepare(QString(GET_NOTE_BY_ID));
@@ -296,6 +346,27 @@ bool Note::updateDueDate(QDate dueDate)    {
     if(m_id)    {
         query.prepare(QString(UPDATE_DUE_DATE));
         query.bindValue(":dueDate", dueDate);
+        query.bindValue(":id", m_id);
+        if(query.exec())  {
+            qInfo()  << "note updated\n";
+            query.clear();
+            return true;
+        } else    {
+            qCritical() << "error updating note\n";
+            qDebug() << query.lastQuery() << query.lastError() << query.boundValues() << m_db.lastError();
+        }
+    }    else    {
+        qWarning() << "invalid note identifier\n";
+    }
+    query.clear();
+    return false;
+}
+
+bool Note::updateText(QString text)    {
+    QSqlQuery query = QSqlQuery(m_db);
+    if(m_id)    {
+        query.prepare(QString(UPDATE_TEXT));
+        query.bindValue(":text", text);
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note updated\n";

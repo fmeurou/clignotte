@@ -224,6 +224,43 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
+    else if(args.at(0) == "encrypt")   {
+        if(args.length() < 2) {
+            qWarning() << "invalid arguments count";
+            exit(-1);
+        }
+
+        QString noteId = args.at(1);
+        int pos = 0;
+        if(v.validate(noteId, pos) == QValidator::Invalid)  {
+            qCritical() << "note id is not valid";
+            exit(-1);
+        }
+        Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
+        if(args.length() > 2) {
+            note.encrypt(args.at(2));
+        }   else    {
+            note.encrypt();
+        }
+        exit(0);
+    }
+
+    else if(args.at(0) == "read")   {
+        if(args.length() < 2) {
+            qWarning() << "invalid arguments count";
+            exit(-1);
+        }
+        QString noteId = args.at(1);
+        int pos = 0;
+        if(v.validate(noteId, pos) == QValidator::Invalid)  {
+            qCritical() << "note id is not valid";
+            exit(-1);
+        }
+        Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
+        out << note.decrypt();
+        exit(0);
+    }
+
     else if(args.at(0) == "delete")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
@@ -242,7 +279,10 @@ int main(int argc, char *argv[])
     else if(args.at(0) == "help")    {
         displayHelp();
 
-    }   else    {
+    } else if(args.at(0) == "clear")    {
+        clignotte.clearDb();
+
+    } else    {
         qCritical() << "invalid command";
         displayHelp();
 

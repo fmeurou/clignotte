@@ -12,14 +12,16 @@
 #include <QTextStream>
 #include <QDateTime>
 #include <QDir>
+#include <QProcess>
+#include <QUuid>
 
 // DEFINE queries
 // DDL
-#define CREATE_NOTEBOOK_TABLE "CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL);"
-#define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"
+#define CREATE_NOTEBOOK_TABLE "CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL, is_encrypted BOOL);"
+#define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, is_encrypted BOOL, FOREIGN KEY(notebook) REFERENCES notebook(id));"
 // Notebooks
 #define INIT_NOTEBOOK_TABLE "INSERT INTO notebook(id, title, last_used) values(0, 'default', 1);"
-#define CURRENT_NOTEBOOK "SELECT id, title, last_used FROM notebook WHERE last_used = 1"
+#define CURRENT_NOTEBOOK "SELECT id, title, last_used, is_encrypted FROM notebook WHERE last_used = 1"
 #define GET_NOTEBOOK_BY_TITLE "SELECT id, title, last_used FROM notebook WHERE title=:title"
 #define GET_NOTEBOOK_BY_ID  "SELECT id, title, last_used FROM notebook WHERE id=:id"
 #define RESET_LAST_USED "UPDATE notebook SET last_used=0"
@@ -32,6 +34,7 @@
 #define LIST_NOTEBOOK_NOTES "SELECT notebook.title, note.id, note.created_at, note.due_date, note.done_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE notebook.id=:notebook ORDER BY done_at, due_date ASC, text"
 #define INSERT_NOTE "insert into note(notebook, created_at, text) values(:notebook, :currentDateTime, :text)"
 #define UPDATE_DUE_DATE "UPDATE note SET due_date=:dueDate WHERE id=:id"
+#define UPDATE_TEXT "UPDATE note SET text=:text WHERE id=:id"
 #define UPDATE_DONE "UPDATE note SET done_at=:currentDateTime WHERE id=:id"
 #define DELETE_NOTE "DELETE FROM note WHERE id=:id"
 #define GET_NOTE_BY_ID "SELECT notebook.title, note.id, note.created_at, note.due_date, note.done_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE note.id=:id"
@@ -71,6 +74,7 @@ private:
     QString m_title;
     bool m_lastUsed;
     QSqlDatabase m_db;
+    bool isEncrypted;
 };
 
 class CLIGNOTTESHARED_EXPORT Note
@@ -80,6 +84,7 @@ public:
     static Note create(QSqlDatabase, QSqlRecord);
     bool save();
     bool updateDueDate(QDate);
+    bool updateText(QString);
     static Note get(int);
     bool isImportant();
     bool isBold();
@@ -102,6 +107,9 @@ public:
     inline void setNotebookId(int v_notebookId) {m_notebookId = v_notebookId;}
     Notebook getNotebook();
     static Note get(QSqlDatabase, int);
+    void encrypt(QString email=QString());
+    QString decrypt();
+
 
 private:
     int m_id;
@@ -110,6 +118,7 @@ private:
     QDate m_dueDate;
     QSqlDatabase m_db;
     int m_notebookId;
+    bool isEncrypted;
 };
 
 
@@ -120,6 +129,7 @@ class CLIGNOTTESHARED_EXPORT Clignotte
 public:
     Clignotte(QString);
     bool initDb();
+    bool clearDb();
     QList<Notebook> notebooks(const int);
     QList<Notebook> activeNotebooks();
     QList<Note> notes();
