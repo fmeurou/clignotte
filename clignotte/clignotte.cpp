@@ -31,13 +31,14 @@ bool Clignotte::initDb()   {
 
             }
         }
+        query.clear();
         return true;
     }
 }
 
 QList<Note> Clignotte::notes() {
     QList<Note> notes;
-    QSqlQuery query = QSqlQuery(m_db);
+    QSqlQuery query(m_db);
     QString listQuery = QString(LIST_NOTES);
     if(query.exec(listQuery))    {
         if(query.first())   {
@@ -47,12 +48,13 @@ QList<Note> Clignotte::notes() {
             }   while(query.next());
         }
     }
+    query.clear();
     return notes;
 }
 
 QList<Notebook> Clignotte::notebooks(const int filter) {
     QList<Notebook> notebooks;
-    QSqlQuery query = QSqlQuery(m_db);
+    QSqlQuery query(m_db);
     QString listQuery = QString(LIST_NOTEBOOKS);
     if(filter == Clignotte::Active)  {
         QString listQuery = QString(LIST_ACTIVE_NOTEBOOKS);
@@ -67,12 +69,13 @@ QList<Notebook> Clignotte::notebooks(const int filter) {
             }   while(query.next());
         }
     }
+    query.clear();
     return notebooks;
 }
 
 Notebook Clignotte::currentNotebook()    {
     Notebook currentNotebook(m_db);
-    QSqlQuery query = QSqlQuery(m_db);
+    QSqlQuery query(m_db);
     if(query.exec(CURRENT_NOTEBOOK))    {
         if(query.first())   {
             currentNotebook = Notebook::create(m_db, query.record());
@@ -81,6 +84,7 @@ Notebook Clignotte::currentNotebook()    {
         qCritical()  << "error querying database\n";
         qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
     }
+    query.clear();
     return currentNotebook;
 }
 
@@ -121,12 +125,13 @@ Notebook Notebook::create(QSqlDatabase v_db, QSqlRecord record)    {
 }
 
 Notebook Notebook::get(QSqlDatabase v_db, int v_id)    {
-    QSqlQuery query = QSqlQuery(v_db);
+    QSqlQuery query(v_db);
     query.prepare(QString(GET_NOTEBOOK_BY_ID));
     query.bindValue(":id", v_id);
     if(query.exec())    {
         if(query.first())   {
             Notebook notebook = Notebook::create(v_db, query.record());
+            query.clear();
             return notebook;
         }   else    {
             qDebug() << "no such notebook";
@@ -135,6 +140,8 @@ Notebook Notebook::get(QSqlDatabase v_db, int v_id)    {
         qCritical()  << "error querying database\n";
         qDebug() << query.lastQuery() << query.lastError() << v_db.lastError();
     }
+    query.clear();
+    return Notebook(v_db);
 }
 
 Notebook Notebook::get(QSqlDatabase v_db, QString v_title)    {
@@ -155,18 +162,21 @@ int    Notebook::save()    {
         QSqlRecord record = query.record();
         query.exec(RESET_LAST_USED);
         query.exec(QString(UPDATE_LAST_USED).arg(record.value(0).toString()));
+        query.clear();
         return 1;
     } else    {
         query.exec(RESET_LAST_USED);
         query.prepare(INSERT_NOTEBOOK);
         query.bindValue(":title", m_title);
         if(query.exec())  {
+            query.clear();
             return 2;
         } else    {
             qCritical()  << "error saving notebook to database\n";
             qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
         }
     }
+    query.clear();
     return 0;
 }
 
@@ -187,7 +197,7 @@ int     Notebook::addNote(QString text)    {
 
 QList<Note> Notebook::notes() {
     QList<Note> notes;
-    QSqlQuery query = QSqlQuery(m_db);
+    QSqlQuery query(m_db);
     query.prepare(QString(LIST_NOTEBOOK_NOTES));
     query.bindValue(":notebook", m_id);
     if(query.exec())    {
@@ -201,6 +211,7 @@ QList<Note> Notebook::notes() {
         qCritical()  << "error querying database\n";
         qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
     }
+    query.clear();
     return notes;
 }
 
@@ -208,11 +219,6 @@ QList<Note> Notebook::notes() {
 //Note
 Note::Note(QSqlDatabase v_db) {
     m_db = v_db;
-}
-
-
-Note Note::get(int id)  {
-
 }
 
 bool Note::isImportant()    {
@@ -238,6 +244,7 @@ Note Note::get(QSqlDatabase v_db, int v_id)    {
     if(query.exec())    {
         if(query.first())   {
             Note note = Note::create(v_db, query.record());
+            query.clear();
             return note;
         }   else    {
             qDebug() << "no such note";
@@ -246,6 +253,7 @@ Note Note::get(QSqlDatabase v_db, int v_id)    {
         qCritical()  << "error querying database\n";
         qDebug() << query.lastQuery() << query.lastError() << v_db.lastError();
     }
+    query.clear();
     return Note(v_db);
 }
 
@@ -272,12 +280,15 @@ bool Note::save()    {
     query.bindValue(":text", m_text);
     if(query.exec())  {
         qInfo()  << "note added";
+        query.clear();
         return true;
     } else    {
         qCritical() << "error saving note to database";
         qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
         return false;
     }
+    query.clear();
+    return false;
 }
 
 bool Note::updateDueDate(QDate dueDate)    {
@@ -288,16 +299,17 @@ bool Note::updateDueDate(QDate dueDate)    {
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note updated\n";
+            query.clear();
             return true;
         } else    {
             qCritical() << "error updating note\n";
             qDebug() << query.lastQuery() << query.lastError() << query.boundValues() << m_db.lastError();
-            return false;
         }
     }    else    {
         qWarning() << "invalid note identifier\n";
-        return false;
     }
+    query.clear();
+    return false;
 }
 
 bool Note::setDone()    {
@@ -308,16 +320,17 @@ bool Note::setDone()    {
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note closed";
+            query.clear();
             return true;
         } else    {
             qCritical() << "error closing note";
             qDebug() << query.lastQuery() << query.lastError() << query.boundValues() << m_db.lastError();
-            return false;
         }
     }    else    {
         qWarning() << "invalid note identifier";
-        return false;
     }
+    query.clear();
+    return false;
 }
 
 bool Note::remove() {
@@ -327,14 +340,15 @@ bool Note::remove() {
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note deleted";
+            query.clear();
             return 1;
         } else    {
             qCritical()  << "error deleting note from database";
             qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
-            return 0;
         }
     }    else    {
         qWarning() << "invalid note identifier\n";
-        return 0;
     }
+    query.clear();
+    return 0;
 }

@@ -2,7 +2,7 @@ QT += core sql gui
 
 CONFIG += c++11
 
-TARGET = clignotte_cli
+TARGET = note
 CONFIG += console
 CONFIG -= app_bundle
 
@@ -13,6 +13,7 @@ LIBS += -lclignotte
 SOURCES += main.cpp
 
 HEADERS +=
+
 
 DISTFILES += \
     pkg/archlinux/PKGBUILD

@@ -109,6 +109,19 @@ void prettyDisplayNotes(Clignotte clignotte)   {
     exit(0);
 }
 
+void displayHelp()  {
+    out << "usage: note <action> <options>\n"
+        << "actions: \n\tno action: display a pretty list of notes"
+        << "\n\tlist: display a complete note list"
+        << "\n\tnotebooks: display a list of notebooks"
+        << "\n\tnotebook <notebook name>: create or set active notebook with name"
+        << "\n\tadd <text>: add a note to the active notebook"
+        << "\n\tdue <note id> <date>: set due date for that note"
+        << "\n\tclose <note id>: mark the note as closed"
+        << "\n\tdelete <note id>: delete note"
+        << "\n\nNB: using ! or * at the beginning of the note marks them as important and bolded";
+    out.flush();
+}
 
 
 int main(int argc, char *argv[])
@@ -146,7 +159,7 @@ int main(int argc, char *argv[])
         exit(0);
     }
     // source is args.at(0), destination is args.at(1)
-    if(args.at(0) == "notebook")   {
+    else if(args.at(0) == "notebook")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
             qInfo() << "./note notebook <name ofnotebook> : creates or sets active notebook";
@@ -158,13 +171,13 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    if(args.at(0) == "notebooks")  {
+    else if(args.at(0) == "notebooks")  {
         displayNotebooks(clignotte);
         exit(0);
     }
 
 
-    if(args.at(0) == "add")   {
+    else if(args.at(0) == "add")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
             exit(-1);
@@ -174,7 +187,7 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    if(args.at(0) == "close")   {
+    else if(args.at(0) == "close")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
             exit(-1);
@@ -190,7 +203,7 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-    if(args.at(0) == "due")   {
+    else if(args.at(0) == "due")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
             exit(-1);
@@ -207,11 +220,11 @@ int main(int argc, char *argv[])
             exit(-1);
         }
         Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
-        note.setDueDate(date);
+        note.updateDueDate(date);
         exit(0);
     }
 
-    if(args.at(0) == "delete")   {
+    else if(args.at(0) == "delete")   {
         if(args.length() < 2) {
             qWarning() << "invalid arguments count";
             exit(-1);
@@ -226,6 +239,12 @@ int main(int argc, char *argv[])
         note.remove();
         exit(0);
     }
+    else if(args.at(0) == "help")    {
+        displayHelp();
 
-    return app.exec();
+    }   else    {
+        qCritical() << "invalid command";
+        displayHelp();
+
+    }
 }

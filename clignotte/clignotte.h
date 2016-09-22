@@ -95,7 +95,7 @@ public:
     inline QSqlDatabase getDb() {return m_db;}
     inline int getNotebookId() {return m_notebookId;}
     inline void setId(int v_id) {m_id = v_id;}
-    inline QString setText(QString v_text) {m_text = v_text;}
+    inline void setText(QString v_text) {m_text = v_text;}
     inline void setCreatedAt(QDateTime v_createdAt) {m_createdAt = v_createdAt;}
     inline void setDoneDate(QDateTime v_doneDate) {m_doneDate = v_doneDate;}
     inline void setDueDate(QDate v_dueDate) {m_dueDate = v_dueDate;}
