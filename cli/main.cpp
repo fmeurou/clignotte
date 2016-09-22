@@ -8,21 +8,23 @@
 #include <QSqlRecord>
 #include <QTextStream>
 #include <QDebug>
+#include <QIntValidator>
 
 #include <iostream>
 
 #include <clignotte.h>
 
 QTextStream out(stdout);
+QIntValidator v(0,1000000);
 
-void displayNotebooks(QSqlQuery query, QSqlDatabase db)    {
-    QList<Notebook> notebooks;
+void displayNotebooks(Clignotte clignotte)    {
+    QList<Notebook> notebooks = clignotte.notebooks(0);
     out  << "  title (* last_used) \n";
     out  << QString("").fill('-',80) << "\n";
     out.flush();
     foreach (Notebook notebook, notebooks) {
         QString lastUsed = "";
-        if(notebook.getlastUsed()) lastUsed="(*)";
+        if(notebook.getLastUsed()) lastUsed="(*)";
         out
                 << notebook.getTitle()
                 << lastUsed
@@ -31,7 +33,7 @@ void displayNotebooks(QSqlQuery query, QSqlDatabase db)    {
     out.flush();
 }
 
-void displayNotes(QTextStream out, Clignotte clignotte)  {
+void listDisplayNotes(Clignotte clignotte)  {
     QList<Note> notes = clignotte.notes();
     out.setFieldAlignment(QTextStream::AlignCenter);
     out     << UNDERLINED_TEXT<< "|"
@@ -62,11 +64,11 @@ void displayNotes(QTextStream out, Clignotte clignotte)  {
         out     << qSetFieldWidth(1) << "|"
                 << qSetFieldWidth(4) << note.getId()
                 << qSetFieldWidth(1) << "|"
-                << qSetFieldWidth(20) << note.getNotebook()
+                << qSetFieldWidth(20) << note.getNotebook().getTitle()
                 << qSetFieldWidth(1) << "|"
                 << qSetFieldWidth(20) << note.getDueDate().toString(Qt::ISODate).left(20)
                 << qSetFieldWidth(1) << "|"
-                << qSetFieldWidth(4) << note.getDoneBool()
+                << qSetFieldWidth(4) << note.isDone()
                 << qSetFieldWidth(1) << "|"
                 << qSetFieldWidth(81) << note.getText()
                 << qSetFieldWidth(1) << "|";
@@ -77,66 +79,32 @@ void displayNotes(QTextStream out, Clignotte clignotte)  {
     exit(0);
 }
 
-void pretty()   {
-    QString listQuery;
-    listQuery = QString(LIST_ACTIVE_NOTEBOOKS);
-    if(query.exec(listQuery))    {
-        if(query.first())   {
-            QSqlRecord record;
-            do  {
-                record = query.record();
-                out << record.value(1).toString() << "\n";
-                out.flush();
-                QSqlQuery subquery;
-                subquery.prepare(QString(LIST_NOTEBOOK_NOTES));
-                subquery.bindValue(":notebook", record.value(0));
-                if(subquery.exec()) {
-                    if(subquery.first())   {
-                        QSqlRecord subrecord;
-                        do  {
-                            subrecord = subquery.record();
-                            QString text = subrecord.value(0).toString();
-                            QDate dueDate = subrecord.value(1).toDate();
-                            bool isImportant = text.startsWith("!");
-                            bool isBold = text.startsWith("*");
-                            bool isDue = dueDate.isValid() && (dueDate < QDate::currentDate());
-                            bool isDone = subrecord.value(2).toBool();
-                            out  << "\t";
-                            if(isDone)   {
-                                out << ITALIC_TEXT;
-                            }   else if(isDue)   {
-                                out << URGENT_TEXT;
-                            }   else if(isImportant)  {
-                                out << IMPORTANT_TEXT;
-                            }     else if(isBold) {
-                                out << INVERTED_TEXT;
-                            }   else    {
-                                out << NORMAL_TEXT;
-                            }
-                            out << "- " << subrecord.value(0).toString();
-                            if(dueDate.isValid() && !isDone) {
-                                out << dueDate.toString(" (yyyy-MM-dd)");
-                            }
-                            out << NORMAL_TEXT;
-                            out << "\n";
-                        }   while(subquery.next());
-                        out.flush();
-                    }   else    {
-                        out  << QCoreApplication::translate("main", "No note available\n");
-                        out.flush();
-                    }
-                } else    {
-                    qCritical()  << "error querying database\n";
-                    qDebug() << subquery.lastQuery() << subquery.lastError() << db.lastError();
-                }
-
-            }   while(query.next());
-        }   else    {
-            out  << QCoreApplication::translate("main", "No note available\n");
+void prettyDisplayNotes(Clignotte clignotte)   {
+    QList<Notebook> notebooks = clignotte.notebooks(Clignotte::Active);
+    foreach(Notebook notebook, notebooks)   {
+        out << notebook.getTitle() << "\n";
+        out.flush();
+        foreach(Note note, notebook.notes())    {
+            out  << "\t";
+            if(note.isDone())   {
+                out << ITALIC_TEXT;
+            }   else if(note.isDue())   {
+                out << URGENT_TEXT;
+            }   else if(note.isImportant())  {
+                out << IMPORTANT_TEXT;
+            }     else if(note.isBold()) {
+                out << INVERTED_TEXT;
+            }   else    {
+                out << NORMAL_TEXT;
+            }
+            out << "- " << note.getText();
+            if(note.isDue()) {
+                out << note.getDueDate().toString(" (yyyy-MM-dd)");
+            }
+            out << NORMAL_TEXT;
+            out << "\n";
         }
-    } else    {
-        qCritical()  << "error querying database\n";
-        qDebug() << query.lastQuery() << query.lastError() << db.lastError();
+        out.flush();
     }
     exit(0);
 }
@@ -170,72 +138,92 @@ int main(int argc, char *argv[])
 
     const QStringList args = parser.positionalArguments();
     if(!args.length())  {
-        pretty(query, db);
+        prettyDisplayNotes(clignotte);
         exit(0);
     }
     if(args.at(0) == "list")  {
-        list(query, db);
+        listDisplayNotes(clignotte);
         exit(0);
     }
     // source is args.at(0), destination is args.at(1)
     if(args.at(0) == "notebook")   {
         if(args.length() < 2) {
-            out  << "no notebook to choose or create...";
+            qWarning() << "invalid arguments count";
+            qInfo() << "./note notebook <name ofnotebook> : creates or sets active notebook";
+            exit(-1);
         }
         else {
-            setNotebookByTitle(query, db, args.mid(1).join(" "));
-            currentNotebook = getCurrentNotebook(query, db);
+            clignotte.getNotebook(args.mid(1).join(" "));
         }
         exit(0);
     }
 
     if(args.at(0) == "notebooks")  {
-        listNotebooks(query, db);
+        displayNotebooks(clignotte);
         exit(0);
     }
 
 
     if(args.at(0) == "add")   {
         if(args.length() < 2) {
-            out  << "no note to add...";
+            qWarning() << "invalid arguments count";
+            exit(-1);
         }
-        else {
-            qDebug() << args.mid(1).join(" ") << currentNotebook["id"];
-            addNote(query, db, args.mid(1).join(" "), currentNotebook);
-
-        }
+        qDebug() << args.mid(1).join(" ") << currentNotebook["id"];
+        clignotte.createNote(args.mid(1).join(" "));
         exit(0);
     }
 
     if(args.at(0) == "close")   {
         if(args.length() < 2) {
-            out  << "no note to close...";
+            qWarning() << "invalid arguments count";
+            exit(-1);
         }
-        else {
-            endNote(query, db, args.at(1));
-
+        QString noteId = args.at(1);
+        int pos = 0;
+        if(v.validate(noteId, pos) == QValidator::Invalid)  {
+            qCritical() << "note id is not valid";
+            exit(-1);
         }
+        Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
+        note.setDone();
         exit(0);
     }
 
     if(args.at(0) == "due")   {
         if(args.length() < 2) {
-            out  << "no note to update...";
+            qWarning() << "invalid arguments count";
+            exit(-1);
         }
-        else {
-            setDueDate(query, db, args.at(1), args.at(2));
-
+        QString noteId = args.at(1);
+        int pos = 0;
+        if(v.validate(noteId, pos) == QValidator::Invalid)  {
+            qCritical() << "note id is not valid";
+            exit(-1);
         }
+        QDate date = QDate::fromString(args.at(2), "yyyy-MM-dd");
+        if(!date.isValid())  {
+            qWarning() << "invalid date format, use yyyy-MM-dd";
+            exit(-1);
+        }
+        Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
+        note.setDueDate(date);
         exit(0);
     }
 
     if(args.at(0) == "delete")   {
         if(args.length() < 2) {
-            out  << "no note to delete...\n";
+            qWarning() << "invalid arguments count";
+            exit(-1);
         }
-        else {
-            deleteNote(query, db, args.at(1));
+        QString noteId = args.at(1);
+        int pos = 0;
+        if(v.validate(noteId, pos) == QValidator::Invalid)  {
+            qCritical() << "note id is not valid";
+            exit(-1);
         }
+        Note note = clignotte.getNote(QVariant(args.at(1)).toInt());
+        note.remove();
         exit(0);
     }
 

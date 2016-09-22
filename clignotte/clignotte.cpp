@@ -1,7 +1,8 @@
 #include "clignotte.h"
 
 //Clignotte
-Clignotte::Clignotte(QString location)  {
+Clignotte::Clignotte(QString location) {
+    m_location = location;
     m_db = QSqlDatabase::addDatabase("QSQLITE");
     QDir storage(location);
     m_db.setDatabaseName(storage.absoluteFilePath("notes.db"));
@@ -40,16 +41,8 @@ QList<Note> Clignotte::notes() {
     QString listQuery = QString(LIST_NOTES);
     if(query.exec(listQuery))    {
         if(query.first())   {
-            QSqlRecord record;
-            Note note(m_db);
             do  {
-                record = query.record();
-                note.setNotebookId(record.value(0).toInt());
-                note.setId(record.value(1).toInt());
-                note.setCreatedAt(record.value(2).toDateTime());
-                note.setDueDate(record.value(3).toDate());
-                note.setDoneDate(record.value(4).toDateTime());
-                note.setText(record.value(5).toString());
+                Note note = Note::create(m_db, query.record());
                 notes.append(note);
             }   while(query.next());
         }
@@ -57,18 +50,19 @@ QList<Note> Clignotte::notes() {
     return notes;
 }
 
-QList<Notebook> Clignotte::notebooks() {
+QList<Notebook> Clignotte::notebooks(const int filter) {
     QList<Notebook> notebooks;
     QSqlQuery query = QSqlQuery(m_db);
     QString listQuery = QString(LIST_NOTEBOOKS);
+    if(filter == Clignotte::Active)  {
+        QString listQuery = QString(LIST_ACTIVE_NOTEBOOKS);
+    }   else if(filter == Clignotte::Current)    {
+        QString listQuery = QString(CURRENT_NOTEBOOK);
+    }
     if(query.exec(listQuery))    {
         if(query.first())   {
-            QSqlRecord record;
-            Notebook notebook(m_db);
             do  {
-                record = query.record();
-                notebook.setId(record.value(0).toInt());
-                notebook.setTitle(record.value(1).toString());
+                Notebook notebook = Notebook::create(m_db, query.record());
                 notebooks.append(notebook);
             }   while(query.next());
         }
@@ -81,10 +75,7 @@ Notebook Clignotte::currentNotebook()    {
     QSqlQuery query = QSqlQuery(m_db);
     if(query.exec(CURRENT_NOTEBOOK))    {
         if(query.first())   {
-            QSqlRecord record;
-            record = query.record();
-            currentNotebook.setId(record.value(0).toInt());
-            currentNotebook.setTitle(record.value(1).toString());
+            currentNotebook = Notebook::create(m_db, query.record());
         }
     } else    {
         qCritical()  << "error querying database\n";
@@ -93,22 +84,50 @@ Notebook Clignotte::currentNotebook()    {
     return currentNotebook;
 }
 
+Notebook Clignotte::getNotebook(int v_id)    {
+    return Notebook::get(m_db, v_id);
+}
+
+Notebook Clignotte::getNotebook(QString v_title)    {
+    return Notebook::get(m_db, v_title);
+}
+
+Note Clignotte::getNote(int v_id)    {
+    return Note::get(m_db, v_id);
+}
+
+int Clignotte::createNotebook(QString v_title) {
+    Notebook notebook(m_db);
+    notebook.setTitle(v_title);
+    return notebook.save();
+}
+
+int Clignotte::createNote(QString v_text)   {
+    Notebook notebook = currentNotebook();
+    return notebook.addNote(v_text);
+}
+
 //Notebook
 Notebook::Notebook(QSqlDatabase v_db) {
     m_db = v_db;
 }
 
-Notebook Notebook::get(QSqlDatabase v_db, int v_id)    {
+Notebook Notebook::create(QSqlDatabase v_db, QSqlRecord record)    {
     Notebook notebook(v_db);
+    notebook.setId(record.value(0).toInt());
+    notebook.setTitle(record.value(1).toString());
+    notebook.setLastUsed(record.value(2).toBool());
+    return notebook;
+}
+
+Notebook Notebook::get(QSqlDatabase v_db, int v_id)    {
     QSqlQuery query = QSqlQuery(v_db);
     query.prepare(QString(GET_NOTEBOOK_BY_ID));
     query.bindValue(":id", v_id);
     if(query.exec())    {
         if(query.first())   {
-            QSqlRecord record;
-            record = query.record();
-            notebook.setId(record.value(0).toInt());
-            notebook.setTitle(record.value(1).toString());
+            Notebook notebook = Notebook::create(v_db, query.record());
+            return notebook;
         }   else    {
             qDebug() << "no such notebook";
         }
@@ -118,14 +137,22 @@ Notebook Notebook::get(QSqlDatabase v_db, int v_id)    {
     }
 }
 
+Notebook Notebook::get(QSqlDatabase v_db, QString v_title)    {
+    // Finds Notebook by title and sets it at last used notebook
+    Notebook notebook(v_db);
+    notebook.setTitle(v_title);
+    notebook.save();
+    return notebook;
+}
+
 int    Notebook::save()    {
+    // Creates a new notebook in database or set the existing one as last used based on its title
     QSqlQuery query = QSqlQuery(m_db);
     query.prepare(GET_NOTEBOOK_BY_TITLE);
     query.bindValue(":title", m_title);
     query.exec();
     if(query.first())   {
-        QSqlRecord record;
-        record = query.record();
+        QSqlRecord record = query.record();
         query.exec(RESET_LAST_USED);
         query.exec(QString(UPDATE_LAST_USED).arg(record.value(0).toString()));
         return 1;
@@ -145,14 +172,17 @@ int    Notebook::save()    {
 
 int     Notebook::getId()   {return m_id;}
 QString Notebook::getTitle()    {return m_title;}
+bool    Notebook::getLastUsed() {return m_lastUsed;}
 void     Notebook::setId(int v_id)   {m_id = v_id;}
 void Notebook::setTitle(QString v_title)    {m_title = v_title;}
+void Notebook::setLastUsed(bool v_lastUsed) {m_lastUsed = v_lastUsed;}
+
 
 int     Notebook::addNote(QString text)    {
     Note note(m_db);
     note.setText(text);
     note.setNotebookId(m_id);
-    note.save();
+    return note.save();
 }
 
 QList<Note> Notebook::notes() {
@@ -162,16 +192,8 @@ QList<Note> Notebook::notes() {
     query.bindValue(":notebook", m_id);
     if(query.exec())    {
         if(query.first())   {
-            QSqlRecord record;
-            Note note(m_db);
             do  {
-                record = query.record();
-                note.setNotebookId(record.value(0).toInt());
-                note.setId(record.value(1).toInt());
-                note.setCreatedAt(record.value(2).toDateTime());
-                note.setDueDate(record.value(3).toDate());
-                note.setDoneDate(record.value(4).toDateTime());
-                note.setText(record.value(5).toString());
+                Note note = Note::create(m_db, query.record());
                 notes.append(note);
             }   while(query.next());
         }
@@ -187,6 +209,7 @@ QList<Note> Notebook::notes() {
 Note::Note(QSqlDatabase v_db) {
     m_db = v_db;
 }
+
 
 Note Note::get(int id)  {
 
@@ -206,6 +229,39 @@ bool Note::isDue() {
 
 bool Note::isDone() {
     return m_doneDate.isValid();
+}
+
+Note Note::get(QSqlDatabase v_db, int v_id)    {
+    QSqlQuery query = QSqlQuery(v_db);
+    query.prepare(QString(GET_NOTE_BY_ID));
+    query.bindValue(":id", v_id);
+    if(query.exec())    {
+        if(query.first())   {
+            Note note = Note::create(v_db, query.record());
+            return note;
+        }   else    {
+            qDebug() << "no such note";
+        }
+    } else  {
+        qCritical()  << "error querying database\n";
+        qDebug() << query.lastQuery() << query.lastError() << v_db.lastError();
+    }
+    return Note(v_db);
+}
+
+Notebook Note::getNotebook()    {
+    return Notebook::get(m_db, m_notebookId);
+}
+
+Note Note::create(QSqlDatabase v_db, QSqlRecord record) {
+    Note note(v_db);
+    note.setNotebookId(record.value(0).toInt());
+    note.setId(record.value(1).toInt());
+    note.setCreatedAt(record.value(2).toDateTime());
+    note.setDueDate(record.value(3).toDate());
+    note.setDoneDate(record.value(4).toDateTime());
+    note.setText(record.value(5).toString());
+    return note;
 }
 
 bool Note::save()    {
@@ -271,11 +327,14 @@ bool Note::remove() {
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note deleted";
+            return 1;
         } else    {
             qCritical()  << "error deleting note from database";
             qDebug() << query.lastQuery() << query.lastError() << m_db.lastError();
+            return 0;
         }
     }    else    {
         qWarning() << "invalid note identifier\n";
+        return 0;
     }
 }
