@@ -263,16 +263,17 @@ void Note::encrypt(QString email)   {
     tmpFile.open(QFile::ReadOnly);
     QString output = tmpFile.readAll();
     tmpFile.close();
-    tmpFile.remove();
-    updateText(output);
+    //tmpFile.remove();
+    updateEncrypt(output);
 }
 
 QString Note::decrypt()   {
     QUuid uuid = QUuid::createUuid();
     QString fileName = QString("/tmp/%1").arg(uuid.toString());
+    qDebug() << fileName;
     QFile tmpFile(fileName);
     if(tmpFile.open(QFile::ReadWrite))  {
-        tmpFile.write(m_text.toLatin1());
+        tmpFile.write(m_data.toByteArray());
     }
     tmpFile.close();
     QProcess process;
@@ -283,7 +284,7 @@ QString Note::decrypt()   {
     tmpFile.open(QFile::ReadOnly);
     QString output = tmpFile.readAll();
     tmpFile.close();
-    tmpFile.remove();
+    //tmpFile.remove();
     return output;
 }
 
@@ -319,6 +320,8 @@ Note Note::create(QSqlDatabase v_db, QSqlRecord record) {
     note.setDueDate(record.value(3).toDate());
     note.setDoneDate(record.value(4).toDateTime());
     note.setText(record.value(5).toString());
+    note.setIsEncrypted(record.value(6).toBool());
+    note.setData(record.value(7));
     return note;
 }
 
@@ -362,11 +365,11 @@ bool Note::updateDueDate(QDate dueDate)    {
     return false;
 }
 
-bool Note::updateText(QString text)    {
+bool Note::updateEncrypt(QVariant data)    {
     QSqlQuery query = QSqlQuery(m_db);
     if(m_id)    {
-        query.prepare(QString(UPDATE_TEXT));
-        query.bindValue(":text", text);
+        query.prepare(QString(UPDATE_ENCRYPT));
+        query.bindValue(":data", data);
         query.bindValue(":id", m_id);
         if(query.exec())  {
             qInfo()  << "note updated\n";
