@@ -1,13 +1,144 @@
-# notes
+# clignotte
 
-## Note app in command line
+A small command-line note keeper backed by a local SQLite database. Notes are
+grouped into notebooks, support due dates, and can be styled with single-char
+prefixes that the renderer turns into ANSI colour codes.
 
-usage :
-- $ note notebooks -> lists available notebooks
-- $ note notebook newNotebook -> creates or sets a notebook called newNotebook as the current notebook
-- $ note -> displays notes per notebook
-- $ note list -> displays a list of notes in a table
-- $ note add This is a new note -> creates a new note in the current notebook
-- $ note due 1 2016-10-10 -> sets a due date for note 1
-- $ note close 1 -> flags note 1 as closed
-- $ note delete 1 -> deletes note 1
+The binary is named `note`; the project (and database) are named `clignotte`.
+
+## Features
+
+- Multiple notebooks, with one always flagged as the current one
+- Optional due dates, with overdue notes highlighted in red
+- Mark notes as done (closed), important, bold, or blinking yellow
+- Full-text search across all notes (SQLite FTS5)
+- Bulk import from a text file (one note per line) or an audio file
+  (one note per Whisper segment, with timestamps)
+- Compact, terminal-width-aware listing
+- Stored as plain SQLite at `$XDG_DATA_HOME/clignotte/notes.db`
+  (typically `~/.local/share/clignotte/notes.db`)
+
+## Build
+
+Requires Qt 6 with the `core` and `sql` modules, plus the SQLite driver.
+On Arch Linux: `pacman -S qt6-base`.
+
+Optional, only for audio import: `pacman -S python-openai-whisper`.
+
+```sh
+qmake6
+make
+```
+
+The build aborts with a clear error if you run the Qt 5 `qmake` by mistake.
+The resulting binary is `./note`.
+
+An Arch `PKGBUILD` is provided under [`pkg/archlinux/`](pkg/archlinux/PKGBUILD).
+
+## Usage
+
+Running `note` with no command prints all notes grouped by notebook:
+
+```sh
+note
+```
+
+`note --help` lists every command. The full reference:
+
+| Command | Description |
+|---|---|
+| *(no command)* | display notes grouped by notebook |
+| `list` | display notes in a single-line table |
+| `add <text>` | add a note to the current notebook |
+| `import <path>` | import notes from a text file (one per line) or audio file (one per Whisper segment) |
+| `close <id>` | mark note `<id>` as done |
+| `due <id> <date>` | set due date `yyyy-MM-dd` for note `<id>` |
+| `important <id>` | mark note `<id>` as important (red) |
+| `bold <id>` | mark note `<id>` as bold (inverted) |
+| `blink <id>` | mark note `<id>` as blinking yellow |
+| `normal <id>` | strip any styling prefix from note `<id>` |
+| `delete <id>` | delete note `<id>` |
+| `notebooks` | list all notebooks |
+| `notebook <title>` | switch to or create notebook `<title>` |
+| `search <query>` | full-text search across all notes (FTS5 syntax) |
+
+### Examples
+
+```sh
+note notebook work          # switch to (or create) the "work" notebook
+note add Call the bank      # add a note to the current notebook
+note due 3 2026-06-01       # give note 3 a due date
+note important 3            # highlight note 3 in red
+note close 3                # mark note 3 as done
+note search "bank OR loan"  # FTS5 boolean search
+note list                   # one-line-per-note overview
+note import bullets.txt     # one note per non-empty line
+note import meeting.opus    # transcribe audio, one note per segment
+```
+
+### Status icons in `list` / `search`
+
+Each row shows a single status character. Priority (highest wins):
+
+| Icon | Meaning | Style |
+|---|---|---|
+| `✓` | done (`close`d) | italic |
+| `!` | overdue (due date is in the past) | red background |
+| `~` | blink-marked | blinking yellow |
+| `*` | important-marked | red |
+| `>` | bold-marked | inverted |
+| `·` | open / no styling | default |
+
+### Styling prefixes
+
+Styling is encoded as a single leading character in the note's text:
+
+- `!foo` → important
+- `*foo` → bold
+- `~foo` → blink yellow
+
+The mark/normal commands manage these prefixes for you, but you can also type
+them directly when adding a note (`note add !urgent fix`). Switching styles
+replaces the prefix without losing content; `normal` strips it.
+
+### Search syntax
+
+`search` uses SQLite FTS5 and supports its query language:
+
+- `pdf` — single token
+- `"exact phrase"` — phrase
+- `bank OR loan` — boolean OR (also `AND`, `NOT`)
+- `migr*` — prefix match
+
+Results are ordered by FTS rank (most relevant first).
+
+### Importing notes
+
+`note import <path>` dispatches based on the file extension:
+
+- **Text files** (any non-audio extension): each non-empty line becomes a note
+  in the current notebook. Whitespace-only lines are skipped; styling prefixes
+  (`!`, `*`, `~`) at the start of a line are honoured. The whole import runs in
+  a single SQL transaction, so large files are fast and partial failures roll
+  back.
+- **Audio files** (`mp3`, `wav`, `ogg`, `oga`, `opus`, `m4a`, `mp4`, `flac`,
+  `aac`, `webm`, `wma`, `amr`, `mka`, `3gp`, `mpeg`, `mpga`): `clignotte`
+  shells out to [`whisper`](https://github.com/openai/whisper)
+  (`pacman -S python-openai-whisper`) with `--output_format json` and creates
+  one note per transcribed segment, prefixed with the segment start time as
+  `[HH:MM:SS]`. Whisper's stderr (model loading, progress) is forwarded so you
+  can follow long transcriptions.
+
+  If `whisper` isn't on `$PATH`, you'll get a clear hint pointing at the
+  package name. Auto language detection is left to Whisper; pre-process or
+  rename your file if you want to force a specific language for now.
+
+### Terminal width
+
+`list` and `search` adapt the text column to your terminal width via
+`ioctl(TIOCGWINSZ)`, with `$COLUMNS` as a fallback (useful for piping). The
+text column never shrinks below 20 characters.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

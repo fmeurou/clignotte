@@ -1,0 +1,30 @@
+# Maintainer: Frédéric Meurou <frederic@meurou.com>
+pkgname=clignotte
+pkgver=1.0
+pkgrel=1
+pkgdesc="A small command-line note keeper backed by SQLite with FTS5 search"
+arch=('x86_64' 'aarch64')
+url="https://github.com/fmeurou/clignotte"
+license=('MIT')
+depends=('qt6-base')
+makedepends=('git')
+optdepends=('python-openai-whisper: transcribe audio files via "note import <audio>"')
+# Pin to a tag once one exists, e.g. source=("git+$url.git#tag=v$pkgver")
+source=("git+$url.git")
+sha256sums=('SKIP')
+
+build() {
+    cd "$srcdir/$pkgname"
+    qmake6 \
+        QMAKE_CFLAGS+="$CFLAGS" \
+        QMAKE_CXXFLAGS+="$CXXFLAGS" \
+        QMAKE_LFLAGS+="$LDFLAGS"
+    make
+}
+
+package() {
+    cd "$srcdir/$pkgname"
+    install -Dm755 note "$pkgdir/usr/bin/note"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+}
