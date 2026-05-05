@@ -29,9 +29,9 @@
 #define CREATE_NOTEBOOK_TABLE "CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL);"
 #define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, uuid TEXT, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"
 #define INIT_NOTEBOOK_TABLE "INSERT INTO notebook(id, title, last_used) values(0, 'default', 1);"
-#define LIST_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY note.id"
+#define LIST_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text, (SELECT COUNT(*) FROM attachment WHERE attachment.note=note.id) FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY note.id"
 #define LIST_ACTIVE_NOTEBOOKS "SELECT DISTINCT notebook.id, notebook.title FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY notebook.title"
-#define LIST_NOTEBOOK_NOTES "select note.text, note.due_date, note.done_at FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE notebook.id=:notebook ORDER BY note.id"
+#define LIST_NOTEBOOK_NOTES "select note.text, note.due_date, note.done_at, (SELECT COUNT(*) FROM attachment WHERE attachment.note=note.id) FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE notebook.id=:notebook ORDER BY note.id"
 #define CURRENT_NOTEBOOK "SELECT id, title FROM notebook WHERE last_used = 1"
 #define INSERT_NOTE "insert into note(notebook, created_at, text, uuid) values(:notebook, :currentDateTime, :text, :uuid)"
 #define UPDATE_DUE_DATE "UPDATE note SET due_date=:dueDate WHERE id=:id"
@@ -49,7 +49,7 @@
 #define CREATE_FTS_TRIGGER_AD "CREATE TRIGGER IF NOT EXISTS note_ad AFTER DELETE ON note BEGIN INSERT INTO note_fts(note_fts, rowid, text) VALUES('delete', old.id, old.text); END"
 #define CREATE_FTS_TRIGGER_AU "CREATE TRIGGER IF NOT EXISTS note_au AFTER UPDATE ON note BEGIN INSERT INTO note_fts(note_fts, rowid, text) VALUES('delete', old.id, old.text); INSERT INTO note_fts(rowid, text) VALUES (new.id, new.text); END"
 #define BACKFILL_NOTE_FTS "INSERT INTO note_fts(rowid, text) SELECT id, text FROM note"
-#define SEARCH_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text FROM note_fts INNER JOIN note ON note.id=note_fts.rowid INNER JOIN notebook ON note.notebook=notebook.id WHERE note_fts MATCH :q ORDER BY rank"
+#define SEARCH_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text, (SELECT COUNT(*) FROM attachment WHERE attachment.note=note.id) FROM note_fts INNER JOIN note ON note.id=note_fts.rowid INNER JOIN notebook ON note.notebook=notebook.id WHERE note_fts MATCH :q ORDER BY rank"
 #define CREATE_ATTACHMENT_TABLE "CREATE TABLE attachment(id INTEGER PRIMARY KEY, note INTEGER NOT NULL, path TEXT NOT NULL, original_path TEXT, created_at DATETIME, FOREIGN KEY(note) REFERENCES note(id));"
 #define INSERT_ATTACHMENT "INSERT INTO attachment(note, path, original_path, created_at) VALUES(:note, :path, :originalPath, :createdAt)"
 #define LIST_NOTE_ATTACHMENTS "SELECT id, path, original_path FROM attachment WHERE note=:note ORDER BY id"
@@ -138,14 +138,15 @@ void printNoteTable(QSqlQuery &query, const QString &emptyMessage)   {
         return;
     }
     const int notebookWidth = 12;
-    const int fixedWidth = 4 + 2 + 1 + 2 + 10 + 2 + notebookWidth + 2;
+    const int fixedWidth = 4 + 2 + 1 + 2 + 1 + 2 + 10 + 2 + notebookWidth + 2;
     int textWidth = terminalCols() - fixedWidth;
     if(textWidth < 20) textWidth = 20;
 
     out << UNDERLINED_TEXT
-        << QString("%1  %2  %3  %4  %5\n")
+        << QString("%1  %2  %3  %4  %5  %6\n")
             .arg("id", 4)
             .arg("s")
+            .arg("a")
             .arg(QString("due").leftJustified(10))
             .arg(QString("notebook").leftJustified(notebookWidth))
             .arg(QString("note").leftJustified(textWidth))
@@ -158,6 +159,7 @@ void printNoteTable(QSqlQuery &query, const QString &emptyMessage)   {
         QDate dueDate = record.value(2).toDate();
         bool isDone = record.value(3).toBool();
         QString text = record.value(4).toString();
+        bool hasAttachment = record.value(5).toInt() > 0;
         bool isImportant = text.startsWith("!");
         bool isBold = text.startsWith("*");
         bool isBlink = text.startsWith("~");
@@ -171,12 +173,14 @@ void printNoteTable(QSqlQuery &query, const QString &emptyMessage)   {
         else if(isImportant)  { style = IMPORTANT_TEXT; icon = "*"; }
         else if(isBold)       { style = INVERTED_TEXT;  icon = ">"; }
 
+        QString attachIcon = hasAttachment ? "@" : " ";
         QString dueStr = dueDate.isValid() ? dueDate.toString(Qt::ISODate) : QString();
 
         out << style
-            << QString("%1  %2  %3  %4  %5")
+            << QString("%1  %2  %3  %4  %5  %6")
                 .arg(id, 4)
                 .arg(icon)
+                .arg(attachIcon)
                 .arg(dueStr.leftJustified(10))
                 .arg(notebook.left(notebookWidth).leftJustified(notebookWidth))
                 .arg(text.left(textWidth))
@@ -232,6 +236,7 @@ void pretty(QSqlQuery &query, QSqlDatabase db)   {
                             bool isBlink = text.startsWith("~");
                             bool isDue = dueDate.isValid() && (dueDate < QDate::currentDate());
                             bool isDone = subrecord.value(2).toBool();
+                            bool hasAttachment = subrecord.value(3).toInt() > 0;
                             out  << "\t";
                             if(isDone)   {
                                 out << ITALIC_TEXT;
@@ -246,7 +251,7 @@ void pretty(QSqlQuery &query, QSqlDatabase db)   {
                             }   else    {
                                 out << NORMAL_TEXT;
                             }
-                            out << "- " << subrecord.value(0).toString();
+                            out << (hasAttachment ? "@ " : "- ") << subrecord.value(0).toString();
                             if(dueDate.isValid() && !isDone) {
                                 out << dueDate.toString(" (yyyy-MM-dd)");
                             }
