@@ -20,19 +20,20 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTime>
+#include <QUuid>
 #include <iostream>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
 // DEFINE queries
 #define CREATE_NOTEBOOK_TABLE "CREATE TABLE notebook(id INTEGER PRIMARY KEY, title TEXT, last_used BOOL);"
-#define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"
+#define CREATE_NOTE_TABLE "CREATE TABLE note(id INTEGER PRIMARY KEY, uuid TEXT, created_at DATETIME, due_date DATE, done_at DATETIME, text TEXT, notebook INTEGER, FOREIGN KEY(notebook) REFERENCES notebook(id));"
 #define INIT_NOTEBOOK_TABLE "INSERT INTO notebook(id, title, last_used) values(0, 'default', 1);"
 #define LIST_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY note.id"
 #define LIST_ACTIVE_NOTEBOOKS "SELECT DISTINCT notebook.id, notebook.title FROM note INNER JOIN notebook ON note.notebook=notebook.id ORDER BY notebook.title"
 #define LIST_NOTEBOOK_NOTES "select note.text, note.due_date, note.done_at FROM note INNER JOIN notebook ON note.notebook=notebook.id WHERE notebook.id=:notebook ORDER BY note.id"
 #define CURRENT_NOTEBOOK "SELECT id, title FROM notebook WHERE last_used = 1"
-#define INSERT_NOTE "insert into note(notebook, created_at, text) values(:notebook, :currentDateTime, :text)"
+#define INSERT_NOTE "insert into note(notebook, created_at, text, uuid) values(:notebook, :currentDateTime, :text, :uuid)"
 #define UPDATE_DUE_DATE "UPDATE note SET due_date=:dueDate WHERE id=:id"
 #define UPDATE_DONE "UPDATE note SET done_at=:currentDateTime WHERE id=:id"
 #define SELECT_NOTE_TEXT "SELECT text FROM note WHERE id=:id"
@@ -49,6 +50,10 @@
 #define CREATE_FTS_TRIGGER_AU "CREATE TRIGGER IF NOT EXISTS note_au AFTER UPDATE ON note BEGIN INSERT INTO note_fts(note_fts, rowid, text) VALUES('delete', old.id, old.text); INSERT INTO note_fts(rowid, text) VALUES (new.id, new.text); END"
 #define BACKFILL_NOTE_FTS "INSERT INTO note_fts(rowid, text) SELECT id, text FROM note"
 #define SEARCH_NOTES "SELECT notebook.title, note.id, note.due_date, note.done_at, note.text FROM note_fts INNER JOIN note ON note.id=note_fts.rowid INNER JOIN notebook ON note.notebook=notebook.id WHERE note_fts MATCH :q ORDER BY rank"
+#define CREATE_ATTACHMENT_TABLE "CREATE TABLE attachment(id INTEGER PRIMARY KEY, note INTEGER NOT NULL, path TEXT NOT NULL, original_path TEXT, created_at DATETIME, FOREIGN KEY(note) REFERENCES note(id));"
+#define INSERT_ATTACHMENT "INSERT INTO attachment(note, path, original_path, created_at) VALUES(:note, :path, :originalPath, :createdAt)"
+#define LIST_NOTE_ATTACHMENTS "SELECT id, path, original_path FROM attachment WHERE note=:note ORDER BY id"
+#define DELETE_ATTACHMENT "DELETE FROM attachment WHERE id=:id"
 
 #define IMPORTANT_TEXT "\e[1;31m"
 #define URGENT_TEXT "\e[7;31m"
@@ -87,6 +92,17 @@ QSqlQuery initDb(QSqlDatabase db)   {
 
             }
         }
+        bool hasUuid = false;
+        if(query.exec("PRAGMA table_info(note)")) {
+            while(query.next()) {
+                if(query.value(1).toString() == "uuid") { hasUuid = true; break; }
+            }
+        }
+        if(!hasUuid) query.exec("ALTER TABLE note ADD COLUMN uuid TEXT");
+
+        if(!db.tables().contains("attachment"))
+            query.exec(CREATE_ATTACHMENT_TABLE);
+
         bool ftsExisted = db.tables().contains("note_fts");
         if(!query.exec(CREATE_NOTE_FTS_TABLE))   {
             qCritical() << "unable to create FTS index — full-text search disabled";
@@ -263,6 +279,7 @@ void addNote(QSqlQuery &query, QSqlDatabase db, QString text, QMap<QString, QStr
     query.bindValue(":currentDateTime", QDateTime::currentDateTime());
     query.bindValue(":notebook", currentNotebook["id"]);
     query.bindValue(":text", text);
+    query.bindValue(":uuid", QUuid::createUuid().toString(QUuid::WithoutBraces));
     if(query.exec())  {
         out  << "note added\n";
     } else    {
@@ -277,6 +294,96 @@ bool isAudioFile(const QString &path)   {
         "flac", "aac", "webm", "wma", "amr", "mka", "3gp"
     };
     return exts.contains(QFileInfo(path).suffix().toLower());
+}
+
+bool isOcrFile(const QString &path)   {
+    static const QStringList exts = {
+        "png", "jpg", "jpeg", "tiff", "tif", "bmp",
+        "pnm", "pbm", "pgm", "ppm", "webp", "pdf"
+    };
+    return exts.contains(QFileInfo(path).suffix().toLower());
+}
+
+static QStringList runTesseract(const QString &filePath)   {
+    QProcess proc;
+    proc.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+    proc.start("tesseract", {filePath, "stdout"});
+    if(!proc.waitForStarted(5000) || !proc.waitForFinished(-1) ||
+       proc.exitStatus() != QProcess::NormalExit || proc.exitCode() != 0)
+        return {};
+    return QString::fromUtf8(proc.readAllStandardOutput()).split('\n');
+}
+
+void importOcr(QSqlQuery &query, QSqlDatabase db, const QString &path, const QMap<QString, QString> &currentNotebook)   {
+    if(!QFileInfo::exists(path))   {
+        out << "file not found: " << path << "\n";
+        out.flush();
+        return;
+    }
+    if(QStandardPaths::findExecutable("tesseract").isEmpty())   {
+        out << "tesseract not found. Install it with: pacman -S tesseract tesseract-data-eng\n";
+        out.flush();
+        return;
+    }
+
+    QStringList allLines;
+    bool isPdf = QFileInfo(path).suffix().toLower() == "pdf";
+
+    if(isPdf)   {
+        if(QStandardPaths::findExecutable("pdftoppm").isEmpty())   {
+            out << "pdftoppm not found (required for PDF OCR). Install it with: pacman -S poppler\n";
+            out.flush();
+            return;
+        }
+        QTemporaryDir tempDir;
+        if(!tempDir.isValid())   {
+            out << "unable to create temporary directory\n";
+            out.flush();
+            return;
+        }
+        out << "converting PDF pages with pdftoppm...\n";
+        out.flush();
+        QProcess pdftoppm;
+        pdftoppm.setProcessChannelMode(QProcess::ForwardedErrorChannel);
+        pdftoppm.start("pdftoppm", {"-png", path, QDir(tempDir.path()).filePath("page")});
+        pdftoppm.waitForStarted(5000);
+        pdftoppm.waitForFinished(-1);
+        if(pdftoppm.exitStatus() != QProcess::NormalExit || pdftoppm.exitCode() != 0)   {
+            out << "pdftoppm failed (exit code " << pdftoppm.exitCode() << ")\n";
+            out.flush();
+            return;
+        }
+        QStringList pages = QDir(tempDir.path()).entryList({"page-*.png"}, QDir::Files, QDir::Name);
+        out << "OCR-ing " << pages.size() << " page(s) with tesseract...\n";
+        out.flush();
+        for(const QString &page : pages)
+            allLines += runTesseract(QDir(tempDir.path()).filePath(page));
+    }   else    {
+        out << "running tesseract on " << path << "...\n";
+        out.flush();
+        allLines = runTesseract(path);
+    }
+
+    int count = 0;
+    db.transaction();
+    query.prepare(QString(INSERT_NOTE));
+    for(const QString &line : allLines)   {
+        if(line.trimmed().isEmpty()) continue;
+        query.bindValue(":currentDateTime", QDateTime::currentDateTime());
+        query.bindValue(":notebook", currentNotebook["id"]);
+        query.bindValue(":text", line.trimmed());
+        query.bindValue(":uuid", QUuid::createUuid().toString(QUuid::WithoutBraces));
+        if(!query.exec())   {
+            qCritical() << "error importing line:" << line;
+            qDebug() << query.lastError() << db.lastError();
+            db.rollback();
+            return;
+        }
+        count++;
+    }
+    db.commit();
+    out << count << " note(s) imported from OCR into notebook '" << currentNotebook["name"] << "'\n";
+    out.flush();
 }
 
 void importAudio(QSqlQuery &query, QSqlDatabase db, const QString &path, const QMap<QString, QString> &currentNotebook)    {
@@ -345,6 +452,7 @@ void importAudio(QSqlQuery &query, QSqlDatabase db, const QString &path, const Q
         query.bindValue(":currentDateTime", QDateTime::currentDateTime());
         query.bindValue(":notebook", currentNotebook["id"]);
         query.bindValue(":text", noteText);
+        query.bindValue(":uuid", QUuid::createUuid().toString(QUuid::WithoutBraces));
         if(!query.exec())   {
             out << "error inserting segment: " << query.lastError().text() << "\n";
             out.flush();
@@ -363,6 +471,10 @@ void importNotes(QSqlQuery &query, QSqlDatabase db, const QString &path, const Q
         importAudio(query, db, path, currentNotebook);
         return;
     }
+    if(isOcrFile(path))   {
+        importOcr(query, db, path, currentNotebook);
+        return;
+    }
     QFile file(path);
     if(!file.open(QIODevice::ReadOnly | QIODevice::Text))   {
         out << "unable to open file: " << path << " - " << file.errorString() << "\n";
@@ -379,6 +491,7 @@ void importNotes(QSqlQuery &query, QSqlDatabase db, const QString &path, const Q
         query.bindValue(":currentDateTime", QDateTime::currentDateTime());
         query.bindValue(":notebook", currentNotebook["id"]);
         query.bindValue(":text", line);
+        query.bindValue(":uuid", QUuid::createUuid().toString(QUuid::WithoutBraces));
         if(!query.exec())   {
             qCritical() << "error importing line:" << line;
             qDebug() << query.lastError() << db.lastError();
@@ -516,6 +629,98 @@ void setNotebookByTitle(QSqlQuery &query, QSqlDatabase db, QString title)    {
     }
 }
 
+void attachFile(QSqlQuery &query, QSqlDatabase db, const QString &noteIdStr, const QString &path, bool copy, const QString &storageDir)    {
+    int noteId = noteIdStr.toInt();
+    if(!noteId)    {
+        qWarning() << "invalid note identifier";
+        return;
+    }
+    QString storedPath = path;
+    QString originalPath;
+    if(copy)    {
+        bool isUrl = path.startsWith("http://") || path.startsWith("https://");
+        if(isUrl)    {
+            out << "cannot copy remote URLs, storing reference only\n";
+            out.flush();
+        }   else    {
+            if(!QFileInfo::exists(path))    {
+                out << "file not found: " << path << "\n";
+                out.flush();
+                return;
+            }
+            QString attachDir = QDir(storageDir).filePath("attachments");
+            QDir().mkpath(attachDir);
+            QString destName = QUuid::createUuid().toString(QUuid::WithoutBraces) + "_" + QFileInfo(path).fileName();
+            QString destPath = QDir(attachDir).filePath(destName);
+            if(!QFile::copy(path, destPath))    {
+                out << "failed to copy file to " << destPath << "\n";
+                out.flush();
+                return;
+            }
+            originalPath = path;
+            storedPath = destPath;
+        }
+    }
+    query.prepare(INSERT_ATTACHMENT);
+    query.bindValue(":note", noteId);
+    query.bindValue(":path", storedPath);
+    query.bindValue(":originalPath", originalPath.isEmpty() ? QVariant() : originalPath);
+    query.bindValue(":createdAt", QDateTime::currentDateTime());
+    if(query.exec())    {
+        out << "attachment added\n";
+    }   else    {
+        qCritical() << "error adding attachment\n";
+        qDebug() << query.lastError() << db.lastError();
+    }
+}
+
+void listAttachments(QSqlQuery &query, QSqlDatabase db, const QString &noteIdStr)    {
+    int noteId = noteIdStr.toInt();
+    if(!noteId)    {
+        qWarning() << "invalid note identifier";
+        return;
+    }
+    query.prepare(LIST_NOTE_ATTACHMENTS);
+    query.bindValue(":note", noteId);
+    if(!query.exec())    {
+        qCritical() << "error querying attachments\n";
+        qDebug() << query.lastError() << db.lastError();
+        return;
+    }
+    if(!query.first())    {
+        out << "no attachments for note " << noteId << "\n";
+        out.flush();
+        return;
+    }
+    out << UNDERLINED_TEXT << QString("%1  %2\n").arg("id", 4).arg("path") << NORMAL_TEXT;
+    do  {
+        QSqlRecord r = query.record();
+        QString id = r.value(0).toString();
+        QString storedPath = r.value(1).toString();
+        QString origPath = r.value(2).toString();
+        QString display = storedPath;
+        if(!origPath.isEmpty()) display += " (copied from: " + origPath + ")";
+        out << QString("%1  %2\n").arg(id, 4).arg(display);
+    }   while(query.next());
+    out.flush();
+}
+
+void detachFile(QSqlQuery &query, QSqlDatabase db, const QString &attachIdStr)    {
+    int attachId = attachIdStr.toInt();
+    if(!attachId)    {
+        qWarning() << "invalid attachment identifier";
+        return;
+    }
+    query.prepare(DELETE_ATTACHMENT);
+    query.bindValue(":id", attachId);
+    if(query.exec())    {
+        out << "attachment removed\n";
+    }   else    {
+        qCritical() << "error removing attachment\n";
+        qDebug() << query.lastError() << db.lastError();
+    }
+}
+
 void listNotebooks(QSqlQuery &query, QSqlDatabase db)    {
     QString listQuery;
     listQuery = LIST_NOTEBOOKS;
@@ -562,6 +767,10 @@ int main(int argc, char *argv[])
     db.setDatabaseName(storage.absoluteFilePath("notes.db"));
     QSqlQuery query = initDb(db);
     currentNotebook = getCurrentNotebook(query, db);
+    auto toolStatus = [](const QString &name) -> QString {
+        return QStandardPaths::findExecutable(name).isEmpty() ? "[not found]" : "[found]";
+    };
+
     QCommandLineParser parser;
     parser.setApplicationDescription(QCoreApplication::translate("main",
         "clignotte - command-line note keeper.\n"
@@ -570,7 +779,7 @@ int main(int argc, char *argv[])
         "  (none)               display notes grouped by notebook\n"
         "  list                 display notes in a table\n"
         "  add <text>           add a note to the current notebook\n"
-        "  import <path>        add notes from a text file (one per line) or an audio file (one per whisper segment)\n"
+        "  import <path>        import from text file, audio (whisper), or image/PDF (tesseract)\n"
         "  close <id>           mark note <id> as done\n"
         "  due <id> <date>      set due date (yyyy-MM-dd) for note <id>\n"
         "  important <id>       mark note <id> as important (red)\n"
@@ -581,11 +790,25 @@ int main(int argc, char *argv[])
         "  notebooks            list all notebooks\n"
         "  notebook <title>     switch to or create notebook <title>\n"
         "  search <query>       full-text search across all notes (FTS5 syntax)\n"
+        "  attach <id> <path>   attach a local file or URL to note <id>\n"
+        "  attachments <id>     list attachments for note <id>\n"
+        "  detach <attach_id>   remove an attachment by its id\n"
         "\n"
-        "Text prefixes in a note: '!' = important (red), '*' = bold (inverted)."));
+        "Options for 'attach':\n"
+        "  --copy               copy the local file into the clignotte storage folder\n"
+        "\n"
+        "Optional tools:\n"
+        "  whisper    %1  audio import (pacman -S python-openai-whisper)\n"
+        "  tesseract  %2  image/PDF OCR import (pacman -S tesseract tesseract-data-eng)\n"
+        "  pdftoppm   %3  PDF-to-image conversion for OCR (pacman -S poppler)\n"
+        "\n"
+        "Text prefixes in a note: '!' = important (red), '*' = bold (inverted).")
+        .arg(toolStatus("whisper"), toolStatus("tesseract"), toolStatus("pdftoppm")));
     parser.addHelpOption();
     parser.addVersionOption();
-    parser.addPositionalArgument("command", QCoreApplication::translate("main", "list | add | import | close | due | important | bold | blink | normal | delete | notebook | notebooks | search"));
+    QCommandLineOption copyOption("copy", "Copy the local file into the clignotte storage folder (used with attach)");
+    parser.addOption(copyOption);
+    parser.addPositionalArgument("command", QCoreApplication::translate("main", "list | add | import | close | due | important | bold | blink | normal | delete | notebook | notebooks | search | attach | attachments | detach"));
     parser.addPositionalArgument("content", QCoreApplication::translate("main", "note id, note text, due date, notebook title or search query"));
 
     // Process the actual command line arguments given by the user
@@ -721,6 +944,36 @@ int main(int argc, char *argv[])
         }
         else {
             search(query, db, args.mid(1).join(" "));
+        }
+        exit(0);
+    }
+
+    if(args.at(0) == "attach")   {
+        if(args.length() < 3) {
+            out  << "usage: attach <note_id> <path_or_url> [--copy]\n";
+        }
+        else {
+            attachFile(query, db, args.at(1), args.at(2), parser.isSet(copyOption), storedNotes);
+        }
+        exit(0);
+    }
+
+    if(args.at(0) == "attachments")   {
+        if(args.length() < 2) {
+            out  << "no note id provided...\n";
+        }
+        else {
+            listAttachments(query, db, args.at(1));
+        }
+        exit(0);
+    }
+
+    if(args.at(0) == "detach")   {
+        if(args.length() < 2) {
+            out  << "no attachment id provided...\n";
+        }
+        else {
+            detachFile(query, db, args.at(1));
         }
         exit(0);
     }
