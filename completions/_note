@@ -1,0 +1,47 @@
+#compdef note
+
+_note() {
+    local -a cmds
+    cmds=(
+        'list:display notes in a table'
+        'today:open notes due today or overdue'
+        'week:open notes due in the next 7 days'
+        'bytag:display notes grouped by tag'
+        'add:add a note (use "-" to read from stdin)'
+        'edit:open $EDITOR on a note'
+        'move:move a note to another notebook'
+        'import:import notes from a file (or "-" for stdin)'
+        'close:mark a note as done'
+        'due:set a due date for a note'
+        'important:mark a note as important (red)'
+        'bold:mark a note as bold (inverted)'
+        'blink:mark a note as blinking yellow'
+        'normal:strip styling prefix from a note'
+        'delete:delete a note'
+        'notebook:switch to or create a notebook'
+        'notebooks:list all notebooks'
+        'close-notebook:mark every open note in a notebook as done'
+        'search:full-text search across all notes'
+        'attach:attach a file or URL to a note'
+        'attachments:list attachments for a note'
+        'detach:remove an attachment'
+        'tag:add tags to a note'
+        'untag:remove tags from a note'
+        'tags:list all tags (or tags on a note)'
+        'export:write notes to a directory as .md files'
+        'sync:reconcile notes from a directory into the database'
+        'completions:emit shell completion script'
+    )
+    if (( CURRENT == 2 )); then
+        _describe 'command' cmds
+        _arguments '--json[machine-readable JSON output]' '--tag[filter by tag]:tag:' '--notebook[filter by notebook]:notebook:' '--all[include closed notes]' '--help[show help]' '--version[show version]'
+    else
+        case "${words[2]}" in
+            import|attach|export|sync) _files ;;
+            completions) _values 'shell' bash zsh fish ;;
+            attach) _arguments '--copy[copy file into storage]' && _files ;;
+        esac
+    fi
+}
+
+_note "$@"
