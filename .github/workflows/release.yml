@@ -33,7 +33,7 @@ jobs:
 
       - name: Build GUI
         run: |
-          qmake6 clignotte-gui.pro
+          qmake6 -o Makefile.gui clignotte-gui.pro
           make -f Makefile.gui
           strip note-gui
 

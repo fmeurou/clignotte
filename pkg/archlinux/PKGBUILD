@@ -25,7 +25,7 @@ build() {
         QMAKE_LFLAGS+="$LDFLAGS"
     make
     # GUI
-    qmake6 clignotte-gui.pro \
+    qmake6 -o Makefile.gui clignotte-gui.pro \
         QMAKE_CFLAGS+="$CFLAGS" \
         QMAKE_CXXFLAGS+="$CXXFLAGS" \
         QMAKE_LFLAGS+="$LDFLAGS"

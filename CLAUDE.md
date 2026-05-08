@@ -16,7 +16,7 @@ qmake6
 make
 
 # GUI binary (./note-gui)
-qmake6 clignotte-gui.pro
+qmake6 -o Makefile.gui clignotte-gui.pro
 make -f Makefile.gui
 
 # Install (default PREFIX=/usr/local)
