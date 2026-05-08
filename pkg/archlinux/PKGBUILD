@@ -1,6 +1,6 @@
 # Maintainer: Frédéric Meurou <frederic@meurou.com>
 pkgname=clignotte
-pkgver=1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="A small note keeper backed by SQLite with FTS5 search — CLI and Qt Quick GUI"
 arch=('x86_64' 'aarch64')
