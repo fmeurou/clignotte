@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import QtQuick.Dialogs
 
 ApplicationWindow {
     id: root
@@ -15,6 +16,7 @@ ApplicationWindow {
 
     property int editingNoteId: -1
     property bool editorOpen: false
+    property bool syncing: false
 
     function openEditor(id) {
         editingNoteId = id
@@ -51,6 +53,25 @@ ApplicationWindow {
                 onToggled: db.notes.includeClosed = checked
             }
             ToolButton {
+                id: syncBtn
+                text: "⟳"
+                font.pixelSize: 20
+                enabled: !root.syncing
+                opacity: root.syncing ? 0.5 : 1.0
+                RotationAnimator on rotation {
+                    running: root.syncing
+                    from: 0; to: 360
+                    duration: 1200
+                    loops: Animation.Infinite
+                }
+                onClicked: {
+                    if (db.syncDir.length === 0)
+                        syncFolderDialog.open()
+                    else
+                        db.runSync()
+                }
+            }
+            ToolButton {
                 id: kebabBtn
                 text: "⋮"
                 font.pixelSize: 20
@@ -75,6 +96,10 @@ ApplicationWindow {
                     MenuItem {
                         text: "New notebook…"
                         onTriggered: newNotebookDialog.open()
+                    }
+                    MenuItem {
+                        text: "Set sync directory…"
+                        onTriggered: syncFolderDialog.open()
                     }
                 }
             }
@@ -123,6 +148,45 @@ ApplicationWindow {
         font.pixelSize: 28
         text: "+"
         onClicked: root.openEditor(-1)
+    }
+
+    Connections {
+        target: db
+        function onSyncStarted()          { root.syncing = true }
+        function onSyncFinished(message)  {
+            root.syncing = false
+            syncToast.show(message)
+        }
+    }
+
+    FolderDialog {
+        id: syncFolderDialog
+        title: "Choose sync directory"
+        onAccepted: {
+            db.syncDir = selectedFolder.toString().replace(/^file:\/\//, "")
+            db.runSync()
+        }
+    }
+
+    Popup {
+        id: syncToast
+        anchors.centerIn: parent
+        padding: 16
+        modal: false
+        closePolicy: Popup.NoAutoClose
+
+        function show(msg) { toastLabel.text = msg; open(); toastTimer.restart() }
+
+        Label {
+            id: toastLabel
+            wrapMode: Text.WordWrap
+            width: Math.min(implicitWidth, root.width - 80)
+        }
+        Timer {
+            id: toastTimer
+            interval: 5000
+            onTriggered: syncToast.close()
+        }
     }
 
     Dialog {

@@ -16,6 +16,7 @@ class DbController : public QObject
     Q_PROPERTY(NoteModel* notes READ notes CONSTANT)
     Q_PROPERTY(int currentNotebookId READ currentNotebookId NOTIFY currentNotebookChanged)
     Q_PROPERTY(QString currentNotebookTitle READ currentNotebookTitle NOTIFY currentNotebookChanged)
+    Q_PROPERTY(QString syncDir READ syncDir WRITE setSyncDir NOTIFY syncDirChanged)
 public:
     explicit DbController(QObject *parent = nullptr);
     ~DbController() override;
@@ -44,10 +45,17 @@ public:
     Q_INVOKABLE void attachFile(int noteId, const QString &path);
     Q_INVOKABLE void detachFile(int attachmentId);
 
+    QString syncDir() const;
+    Q_INVOKABLE void setSyncDir(const QString &dir);
+    Q_INVOKABLE void runSync();
+
 signals:
     void currentNotebookChanged();
     void notesChanged();
     void attachmentsChanged();
+    void syncDirChanged();
+    void syncStarted();
+    void syncFinished(const QString &message);
 
 private:
     QSqlDatabase m_db;
