@@ -19,7 +19,7 @@ jobs:
       - name: Install dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm qt6-base qt6-declarative make gcc binutils git
+          pacman -S --noconfirm qt6-base qt6-declarative make gcc binutils git openssh
 
       - name: Read version
         id: version
@@ -46,3 +46,38 @@ jobs:
           files: |
             note
             note-gui
+
+      - name: Update PKGBUILD and .SRCINFO versions
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" pkg/archlinux/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/"          pkg/archlinux/PKGBUILD
+          sed -i "s/pkgver = .*/pkgver = ${VERSION}/" .SRCINFO
+          sed -i "s/pkgrel = .*/pkgrel = 1/"          .SRCINFO
+
+      - name: Publish to AUR
+        if: ${{ secrets.AUR_SSH_KEY != '' }}
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan aur.archlinux.org >> ~/.ssh/known_hosts
+
+          git config --global user.email "fmeurou@odolix.fr"
+          git config --global user.name "Frédéric Meurou"
+
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur" \
+            git clone ssh://aur@aur.archlinux.org/clignotte.git /tmp/aur
+
+          cp pkg/archlinux/PKGBUILD /tmp/aur/PKGBUILD
+          cp .SRCINFO               /tmp/aur/.SRCINFO
+
+          cd /tmp/aur
+          git add PKGBUILD .SRCINFO
+          git diff --cached --quiet || \
+            git commit -m "Update to v${VERSION}"
+          GIT_SSH_COMMAND="ssh -i ~/.ssh/aur" git push
