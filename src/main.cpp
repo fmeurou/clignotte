@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
 {
     QCoreApplication app(argc, argv);
     QCoreApplication::setApplicationName("clignotte");
-    QCoreApplication::setApplicationVersion("1.0");
+    QCoreApplication::setApplicationVersion("1.0.0");
     QMap<QString, QString> currentNotebook;
 
     QString storedNotes = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
