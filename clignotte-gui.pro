@@ -8,18 +8,18 @@ TARGET = note-gui
 TEMPLATE = app
 
 SOURCES += \
-    gui/main.cpp \
-    gui/dbcontroller.cpp \
-    gui/notebookmodel.cpp \
-    gui/notemodel.cpp
+    src/gui/main.cpp \
+    src/gui/dbcontroller.cpp \
+    src/gui/notebookmodel.cpp \
+    src/gui/notemodel.cpp
 
 HEADERS += \
-    gui/dbcontroller.h \
-    gui/notebookmodel.h \
-    gui/notemodel.h
+    src/gui/dbcontroller.h \
+    src/gui/notebookmodel.h \
+    src/gui/notemodel.h
 
 RESOURCES += \
-    gui/qml.qrc
+    src/gui/qml.qrc
 
 OBJECTS_DIR = build-gui
 MOC_DIR     = build-gui
