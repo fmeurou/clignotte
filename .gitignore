@@ -1,0 +1,22 @@
+# Build artifacts
+*.o
+*.a
+*.so
+moc_*.cpp
+qrc_*.cpp
+*.stash
+
+# Binaries
+note
+note-gui
+
+# Build directories
+build-gui/
+
+# Qt/IDE project files
+.qmake.stash
+.qtc_clangd/
+.qtcreator/
+
+# Misc
+nohup.out
