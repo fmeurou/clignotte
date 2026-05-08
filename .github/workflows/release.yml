@@ -13,6 +13,9 @@ jobs:
     permissions:
       contents: write
 
+    env:
+      AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -57,9 +60,8 @@ jobs:
           sed -i "s/pkgrel = .*/pkgrel = 1/"          .SRCINFO
 
       - name: Publish to AUR
-        if: ${{ secrets.AUR_SSH_KEY != '' }}
+        if: ${{ env.AUR_SSH_KEY != '' }}
         env:
-          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           mkdir -p ~/.ssh
