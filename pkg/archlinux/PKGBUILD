@@ -6,7 +6,7 @@ pkgdesc="A small note keeper backed by SQLite with FTS5 search — CLI and Qt Qu
 arch=('x86_64' 'aarch64')
 url="https://github.com/fmeurou/clignotte"
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-quickcontrols2')
+depends=('qt6-base' 'qt6-declarative')
 makedepends=('git')
 optdepends=('python-openai-whisper: transcribe audio files via "note import <audio>"'
             'tesseract: OCR image files via "note import <image>"'
