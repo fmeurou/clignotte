@@ -2,11 +2,11 @@
 pkgname=clignotte
 pkgver=1.0
 pkgrel=1
-pkgdesc="A small command-line note keeper backed by SQLite with FTS5 search"
+pkgdesc="A small note keeper backed by SQLite with FTS5 search — CLI and Qt Quick GUI"
 arch=('x86_64' 'aarch64')
 url="https://github.com/fmeurou/clignotte"
 license=('MIT')
-depends=('qt6-base')
+depends=('qt6-base' 'qt6-declarative' 'qt6-quickcontrols2')
 makedepends=('git')
 optdepends=('python-openai-whisper: transcribe audio files via "note import <audio>"'
             'tesseract: OCR image files via "note import <image>"'
@@ -18,16 +18,24 @@ sha256sums=('SKIP')
 
 build() {
     cd "$srcdir/$pkgname"
+    # CLI
     qmake6 \
         QMAKE_CFLAGS+="$CFLAGS" \
         QMAKE_CXXFLAGS+="$CXXFLAGS" \
         QMAKE_LFLAGS+="$LDFLAGS"
     make
+    # GUI
+    qmake6 clignotte-gui.pro \
+        QMAKE_CFLAGS+="$CFLAGS" \
+        QMAKE_CXXFLAGS+="$CXXFLAGS" \
+        QMAKE_LFLAGS+="$LDFLAGS"
+    make -f Makefile.gui
 }
 
 package() {
     cd "$srcdir/$pkgname"
-    install -Dm755 note "$pkgdir/usr/bin/note"
-    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+    install -Dm755 note     "$pkgdir/usr/bin/note"
+    install -Dm755 note-gui "$pkgdir/usr/bin/note-gui"
+    install -Dm644 LICENSE  "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
     install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 }
