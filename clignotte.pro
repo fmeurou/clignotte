@@ -11,31 +11,33 @@ CONFIG -= app_bundle
 
 TEMPLATE = app
 
+INCLUDEPATH += src
+
 SOURCES += \
-    main.cpp \
-    common.cpp \
-    db.cpp \
-    render.cpp \
-    notebook.cpp \
-    notes.cpp \
-    tags.cpp \
-    attachments.cpp \
-    import.cpp \
-    sync.cpp \
-    completions.cpp
+    src/main.cpp \
+    src/common.cpp \
+    src/db.cpp \
+    src/render.cpp \
+    src/notebook.cpp \
+    src/notes.cpp \
+    src/tags.cpp \
+    src/attachments.cpp \
+    src/import.cpp \
+    src/sync.cpp \
+    src/completions.cpp
 
 HEADERS += \
-    common.h \
-    sql.h \
-    db.h \
-    render.h \
-    notebook.h \
-    notes.h \
-    tags.h \
-    attachments.h \
-    import.h \
-    sync.h \
-    completions.h
+    src/common.h \
+    src/sql.h \
+    src/db.h \
+    src/render.h \
+    src/notebook.h \
+    src/notes.h \
+    src/tags.h \
+    src/attachments.h \
+    src/import.h \
+    src/sync.h \
+    src/completions.h
 
 DISTFILES += \
     pkg/archlinux/PKGBUILD
